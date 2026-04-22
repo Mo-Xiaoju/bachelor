@@ -1,0 +1,70 @@
+# Logs
+logs
+*.log
+**/debug.log
+
+# Docker
+docker-compose.yml
+
+# Deployment scripts
+*.ps1
+
+# Uploads directory (user uploaded files)
+uploads/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Build artifacts
+build/
+out/
+
+# Dependency directories
+node_modules/
+__pycache__/
+
+# Backup files
+*.bak
+*.tmp
+
+# Virtual environments
+venv/
+env/
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+test-results/
+
+# TypeScript
+*.tsbuildinfo
+
+# ESLint
+.eslintcache
+
+# Vite
+*.timestamp-*-*.mjs
+
+# Cypress
+/cypress/videos/
+/cypress/screenshots/
+
+# Vitest
+__screenshots__/
+
+#push_to_aliyun.ps1
+push_to_aliyun.ps1
