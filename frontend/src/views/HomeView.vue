@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const user = ref<any>(null)
@@ -34,7 +35,7 @@ const checkAuth = async () => {
   }
 
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -159,7 +160,7 @@ const paginatedAnnouncements = computed(() => {
 const getUnreadCount = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/announcements/unread-count', {
+    const response = await fetch(buildURL('/api/announcements/unread-count'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -180,7 +181,7 @@ const getSelectionResults = async () => {
   loadingSelection.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection-result', {
+    const response = await fetch(buildURL('/api/double-selection-result'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -240,7 +241,7 @@ const getMyApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
     // 获取学生实习申请列表
-    const response = await fetch('http://localhost:5000/api/student/applications', {
+    const response = await fetch(buildURL('/api/student/applications'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -259,7 +260,7 @@ const getMyApplications = async () => {
         }))
 
       // 保留原有的科研训练和双选申请
-      const otherAppsResponse = await fetch('http://localhost:5000/api/my-applications', {
+      const otherAppsResponse = await fetch(buildURL('/api/my-applications'), {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -285,7 +286,7 @@ const getTrainProjects = async () => {
   loadingTrainProjects.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/confirmed', {
+    const response = await fetch(buildURL('/api/research-projects/confirmed'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -311,7 +312,7 @@ const getInternships = async () => {
   try {
     const token = sessionStorage.getItem('token')
     // 获取学生实习申请列表
-    const response = await fetch('http://localhost:5000/api/student/applications', {
+    const response = await fetch(buildURL('/api/student/applications'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -341,7 +342,7 @@ const getAnnouncements = async () => {
   loadingAnnouncements.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/announcements', {
+    const response = await fetch(buildURL('/api/announcements'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -1329,7 +1330,7 @@ onUnmounted(() => {
 }
 
 
-  
+
 
 .log-file a {
   color: #2196f3;

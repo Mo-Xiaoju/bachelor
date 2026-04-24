@@ -1,3 +1,472 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
+
+const router = useRouter()
+const activeMenu = ref('科研训练')
+const activeSubTab = ref('registration')
+const currentPage = ref(1)
+const pageSize = ref(10)
+const loading = ref(false)
+const showProjectDetail = ref(false)
+const selectedProject = ref<any>(null)
+const projectDescription = ref('')
+const registrationRequirements = ref('')
+const teacherTitle = ref('')
+const teacherEmail = ref('')
+const user = ref<any>(null)
+const totalPages = ref(1)
+const total = ref(0)
+const confirmedProjects = ref<any[]>([])
+const loadingConfirmed = ref(false)
+const teacherProjects = ref<any[]>([])
+const loadingTeacherProjects = ref(false)
+
+const getConfirmedProjects = async () => {
+  loadingConfirmed.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/confirmed'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      confirmedProjects.value = result.projects
+    }
+  } catch (error) {
+    console.error('获取已确认课题失败', error)
+  } finally {
+    loadingConfirmed.value = false
+  }
+}
+
+const getTeacherProjects = async () => {
+  loadingTeacherProjects.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/teacher'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      teacherProjects.value = result.projects
+    }
+  } catch (error) {
+    console.error('获取教师课题失败', error)
+  } finally {
+    loadingTeacherProjects.value = false
+  }
+}
+
+const menuItems = ref([
+  { category: '科研训练', name: '科研训练', path: 'train' },
+  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
+  { category: '实验教学管理', name: '项目申请', path: 'project' },
+])
+
+const teacherMenuItems = ref([
+  { category: '科研训练', name: '科研训练', path: 'train' },
+  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
+  { category: '实验教学管理', name: '项目申请', path: 'project' },
+  { category: '科研训练', name: '报名处理', path: 'registration' },
+])
+
+const studentMenuItems = ref([
+  { category: '科研训练', name: '科研训练', path: 'train' },
+  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
+  { category: '实验教学管理', name: '学生项目申请', path: 'student-project' },
+])
+
+const adminMenuItems = ref([
+  { category: '科研训练', name: '科研训练', path: 'train' },
+  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
+  { category: '实验教学管理', name: '项目申请', path: 'project' },
+  { category: '科研训练', name: '报名处理', path: 'registration' },
+])
+
+const filter = ref({
+  batch: '',
+  direction: '',
+  teacherUsername: '',
+  teacherName: '',
+})
+
+// 项目申请表单
+const projectForm = ref({
+  batch: '',
+  projectName: '',
+  direction: '',
+  maxStudents: 1,
+  major: '',
+  department: '',
+  isNational: false,
+  nationalLab: '',
+  description: '',
+  requirements: '',
+})
+
+const projects = ref<any[]>([])
+
+// 获取当前登录用户信息
+const getUserInfo = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/check-auth'), {
+      credentials: 'include',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const result = await response.json()
+    if (result.success) {
+      user.value = result.user
+    }
+  } catch (error) {
+    console.error('获取用户信息失败', error)
+  }
+}
+
+const getProjects = async () => {
+  loading.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects?all=true'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      projects.value = result.projects
+      total.value = result.total
+      totalPages.value = Math.ceil(result.total / pageSize.value)
+      // 获取学生的报名状态（仅对学生）
+      if (isStudent.value) {
+        await getRegistrationStatus()
+      }
+    }
+  } catch (error) {
+    console.error('获取项目列表失败', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const getRegistrationStatus = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/registrations'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      // 更新已报名项目的状态
+      const registeredProjectIds = result.projects.map((p: any) => p.id)
+      projects.value = projects.value.map((project: any) => ({
+        ...project,
+        registered: registeredProjectIds.includes(project.id),
+      }))
+    }
+  } catch (error) {
+    console.error('获取报名状态失败', error)
+  }
+}
+
+const isTeacher = computed(() => {
+  return user.value?.role === 'teacher'
+})
+
+const isStudent = computed(() => {
+  return user.value?.role === 'student'
+})
+
+const currentProjects = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return projects.value.slice(start, end)
+})
+
+const handleMenuClick = (item: any) => {
+  activeMenu.value = item.name
+}
+
+const searchProjects = async () => {
+  loading.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const params = new URLSearchParams()
+    if (filter.value.batch) params.append('batch', filter.value.batch)
+    if (filter.value.direction) params.append('direction', filter.value.direction)
+    if (filter.value.projectName) params.append('projectName', filter.value.projectName)
+    if (filter.value.teacherUsername) params.append('teacherUsername', filter.value.teacherUsername)
+    if (filter.value.teacherName) params.append('teacherName', filter.value.teacherName)
+    params.append('all', 'true')
+
+    const response = await fetch(
+      buildURL(`/api/research-projects?${params.toString()}`),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+      },
+    )
+    const result = await response.json()
+    if (result.success) {
+      projects.value = result.projects
+      total.value = result.total
+      totalPages.value = Math.ceil(result.total / pageSize.value)
+      // 获取学生的报名状态（仅对学生）
+      if (isStudent.value) {
+        await getRegistrationStatus()
+      }
+    }
+  } catch (error) {
+    console.error('搜索项目失败', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+const clearFilter = () => {
+  filter.value = {
+    batch: '',
+    direction: '',
+    teacherUsername: '',
+    teacherName: '',
+  }
+  searchProjects()
+}
+
+const viewProject = async (projectId: number) => {
+  console.log('查看项目:', projectId)
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/research-projects/${projectId}`), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      selectedProject.value = result.project
+      projectDescription.value = result.project.description || ''
+      registrationRequirements.value = result.project.requirements || ''
+      showProjectDetail.value = true
+    }
+  } catch (error) {
+    console.error('获取项目详情失败', error)
+  }
+}
+
+const closeProjectDetail = () => {
+  showProjectDetail.value = false
+  selectedProject.value = null
+}
+
+const registerProject = async (projectId: number) => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/register'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify({ projectId }),
+    })
+    const result = await response.json()
+    if (result.success) {
+      alert('报名成功')
+      // 更新项目状态
+      const project = projects.value.find((p) => p.id === projectId)
+      if (project) {
+        project.registered = true
+      }
+      // 重新获取项目列表以更新数据
+      await getProjects()
+    } else {
+      alert('报名失败: ' + result.message)
+    }
+  } catch (error) {
+    console.error('报名失败', error)
+    alert('网络错误，请稍后重试')
+  }
+}
+
+const submitProjectApplication = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/apply'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify(projectForm.value),
+    })
+    const result = await response.json()
+    if (result.success) {
+      alert('项目申请提交成功，等待管理员审核')
+      // 重置表单
+      projectForm.value = {
+        batch: '',
+        projectName: '',
+        direction: '',
+        maxStudents: 1,
+        major: '',
+        department: '',
+        isNational: false,
+        nationalLab: '',
+        description: '',
+        requirements: '',
+      }
+    } else {
+      alert('提交失败: ' + result.message)
+    }
+  } catch (error) {
+    console.error('提交项目申请失败', error)
+    alert('网络错误，请稍后重试')
+  }
+}
+
+const handlePageSizeChange = () => {
+  currentPage.value = 1
+  totalPages.value = Math.ceil(projects.value.length / pageSize.value)
+}
+
+const changePage = (page: number) => {
+  if (page >= 1 && page <= totalPages.value) {
+    currentPage.value = page
+  }
+}
+
+const getPageNumbers = () => {
+  const pages = []
+  const maxVisiblePages = 5
+
+  if (totalPages.value <= maxVisiblePages) {
+    for (let i = 1; i <= totalPages.value; i++) {
+      pages.push(i)
+    }
+  } else {
+    const startPage = Math.max(1, currentPage.value - Math.floor(maxVisiblePages / 2))
+    const endPage = Math.min(totalPages.value, startPage + maxVisiblePages - 1)
+
+    if (startPage > 1) {
+      pages.push(1)
+      if (startPage > 2) {
+        pages.push('...')
+      }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pages.push(i)
+    }
+
+    if (endPage < totalPages.value) {
+      if (endPage < totalPages.value - 1) {
+        pages.push('...')
+      }
+      pages.push(totalPages.value)
+    }
+  }
+
+  return pages
+}
+
+const pendingRegistrations = ref<any[]>([])
+const loadingRegistrations = ref(false)
+
+const getPendingRegistrations = async () => {
+  loadingRegistrations.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(
+      buildURL('/api/research-projects/registrations/pending'),
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+      },
+    )
+    const result = await response.json()
+    if (result.success) {
+      pendingRegistrations.value = result.registrations
+    }
+  } catch (error) {
+    console.error('获取待处理报名失败', error)
+  } finally {
+    loadingRegistrations.value = false
+  }
+}
+
+const handleRegistration = async (registrationId: number, action: 'approve' | 'reject') => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(
+      buildURL(`/api/research-projects/registrations/${registrationId}`),
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+        body: JSON.stringify({ registrationId, action }),
+      },
+    )
+    const result = await response.json()
+    if (result.success) {
+      alert(`报名请求${action === 'approve' ? '已批准' : '已拒绝'}`)
+      await getPendingRegistrations()
+    } else {
+      alert('处理失败: ' + result.message)
+    }
+  } catch (error) {
+    console.error('处理报名失败', error)
+    alert('网络错误，请稍后重试')
+  }
+}
+
+onMounted(async () => {
+  console.log('科研训练页面加载')
+  await getUserInfo()
+  await getProjects()
+  // 如果是学生，获取已确认课题
+  if (isStudent.value) {
+    await getConfirmedProjects()
+  }
+  // 如果是教师，获取我的课题
+  if (isTeacher.value) {
+    await getTeacherProjects()
+  }
+  // 计算总页数
+  totalPages.value = Math.ceil(projects.value.length / pageSize.value)
+  total.value = projects.value.length
+  // 如果是教师或管理员，获取待处理报名
+  if (isTeacher.value || user.value?.role === 'admin') {
+    await getPendingRegistrations()
+  }
+})
+</script>
+
+
 <template>
   <div class="train-view">
     <!-- 标题区域 -->
@@ -591,472 +1060,7 @@
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
-const activeMenu = ref('科研训练')
-const activeSubTab = ref('registration')
-const currentPage = ref(1)
-const pageSize = ref(10)
-const loading = ref(false)
-const showProjectDetail = ref(false)
-const selectedProject = ref<any>(null)
-const projectDescription = ref('')
-const registrationRequirements = ref('')
-const teacherTitle = ref('')
-const teacherEmail = ref('')
-const user = ref<any>(null)
-const totalPages = ref(1)
-const total = ref(0)
-const confirmedProjects = ref<any[]>([])
-const loadingConfirmed = ref(false)
-const teacherProjects = ref<any[]>([])
-const loadingTeacherProjects = ref(false)
-
-const getConfirmedProjects = async () => {
-  loadingConfirmed.value = true
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/confirmed', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-    const result = await response.json()
-    if (result.success) {
-      confirmedProjects.value = result.projects
-    }
-  } catch (error) {
-    console.error('获取已确认课题失败', error)
-  } finally {
-    loadingConfirmed.value = false
-  }
-}
-
-const getTeacherProjects = async () => {
-  loadingTeacherProjects.value = true
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/teacher', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-    const result = await response.json()
-    if (result.success) {
-      teacherProjects.value = result.projects
-    }
-  } catch (error) {
-    console.error('获取教师课题失败', error)
-  } finally {
-    loadingTeacherProjects.value = false
-  }
-}
-
-const menuItems = ref([
-  { category: '科研训练', name: '科研训练', path: 'train' },
-  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
-  { category: '实验教学管理', name: '项目申请', path: 'project' },
-])
-
-const teacherMenuItems = ref([
-  { category: '科研训练', name: '科研训练', path: 'train' },
-  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
-  { category: '实验教学管理', name: '项目申请', path: 'project' },
-  { category: '科研训练', name: '报名处理', path: 'registration' },
-])
-
-const studentMenuItems = ref([
-  { category: '科研训练', name: '科研训练', path: 'train' },
-  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
-  { category: '实验教学管理', name: '学生项目申请', path: 'student-project' },
-])
-
-const adminMenuItems = ref([
-  { category: '科研训练', name: '科研训练', path: 'train' },
-  { category: '实验教学管理', name: '实验报告上传', path: 'report' },
-  { category: '实验教学管理', name: '项目申请', path: 'project' },
-  { category: '科研训练', name: '报名处理', path: 'registration' },
-])
-
-const filter = ref({
-  batch: '',
-  direction: '',
-  teacherUsername: '',
-  teacherName: '',
-})
-
-// 项目申请表单
-const projectForm = ref({
-  batch: '',
-  projectName: '',
-  direction: '',
-  maxStudents: 1,
-  major: '',
-  department: '',
-  isNational: false,
-  nationalLab: '',
-  description: '',
-  requirements: '',
-})
-
-const projects = ref<any[]>([])
-
-// 获取当前登录用户信息
-const getUserInfo = async () => {
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/check-auth', {
-      credentials: 'include',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    const result = await response.json()
-    if (result.success) {
-      user.value = result.user
-    }
-  } catch (error) {
-    console.error('获取用户信息失败', error)
-  }
-}
-
-const getProjects = async () => {
-  loading.value = true
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects?all=true', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-    const result = await response.json()
-    if (result.success) {
-      projects.value = result.projects
-      total.value = result.total
-      totalPages.value = Math.ceil(result.total / pageSize.value)
-      // 获取学生的报名状态（仅对学生）
-      if (isStudent.value) {
-        await getRegistrationStatus()
-      }
-    }
-  } catch (error) {
-    console.error('获取项目列表失败', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-const getRegistrationStatus = async () => {
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/registrations', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-    const result = await response.json()
-    if (result.success) {
-      // 更新已报名项目的状态
-      const registeredProjectIds = result.projects.map((p: any) => p.id)
-      projects.value = projects.value.map((project: any) => ({
-        ...project,
-        registered: registeredProjectIds.includes(project.id),
-      }))
-    }
-  } catch (error) {
-    console.error('获取报名状态失败', error)
-  }
-}
-
-const isTeacher = computed(() => {
-  return user.value?.role === 'teacher'
-})
-
-const isStudent = computed(() => {
-  return user.value?.role === 'student'
-})
-
-const currentProjects = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  const end = start + pageSize.value
-  return projects.value.slice(start, end)
-})
-
-const handleMenuClick = (item: any) => {
-  activeMenu.value = item.name
-}
-
-const searchProjects = async () => {
-  loading.value = true
-  try {
-    const token = sessionStorage.getItem('token')
-    const params = new URLSearchParams()
-    if (filter.value.batch) params.append('batch', filter.value.batch)
-    if (filter.value.direction) params.append('direction', filter.value.direction)
-    if (filter.value.projectName) params.append('projectName', filter.value.projectName)
-    if (filter.value.teacherUsername) params.append('teacherUsername', filter.value.teacherUsername)
-    if (filter.value.teacherName) params.append('teacherName', filter.value.teacherName)
-    params.append('all', 'true')
-
-    const response = await fetch(
-      `http://localhost:5000/api/research-projects?${params.toString()}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: 'include',
-      },
-    )
-    const result = await response.json()
-    if (result.success) {
-      projects.value = result.projects
-      total.value = result.total
-      totalPages.value = Math.ceil(result.total / pageSize.value)
-      // 获取学生的报名状态（仅对学生）
-      if (isStudent.value) {
-        await getRegistrationStatus()
-      }
-    }
-  } catch (error) {
-    console.error('搜索项目失败', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-const clearFilter = () => {
-  filter.value = {
-    batch: '',
-    direction: '',
-    teacherUsername: '',
-    teacherName: '',
-  }
-  searchProjects()
-}
-
-const viewProject = async (projectId: number) => {
-  console.log('查看项目:', projectId)
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/research-projects/${projectId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-    const result = await response.json()
-    if (result.success) {
-      selectedProject.value = result.project
-      projectDescription.value = result.project.description || ''
-      registrationRequirements.value = result.project.requirements || ''
-      showProjectDetail.value = true
-    }
-  } catch (error) {
-    console.error('获取项目详情失败', error)
-  }
-}
-
-const closeProjectDetail = () => {
-  showProjectDetail.value = false
-  selectedProject.value = null
-}
-
-const registerProject = async (projectId: number) => {
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-      body: JSON.stringify({ projectId }),
-    })
-    const result = await response.json()
-    if (result.success) {
-      alert('报名成功')
-      // 更新项目状态
-      const project = projects.value.find((p) => p.id === projectId)
-      if (project) {
-        project.registered = true
-      }
-      // 重新获取项目列表以更新数据
-      await getProjects()
-    } else {
-      alert('报名失败: ' + result.message)
-    }
-  } catch (error) {
-    console.error('报名失败', error)
-    alert('网络错误，请稍后重试')
-  }
-}
-
-const submitProjectApplication = async () => {
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/apply', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-      body: JSON.stringify(projectForm.value),
-    })
-    const result = await response.json()
-    if (result.success) {
-      alert('项目申请提交成功，等待管理员审核')
-      // 重置表单
-      projectForm.value = {
-        batch: '',
-        projectName: '',
-        direction: '',
-        maxStudents: 1,
-        major: '',
-        department: '',
-        isNational: false,
-        nationalLab: '',
-        description: '',
-        requirements: '',
-      }
-    } else {
-      alert('提交失败: ' + result.message)
-    }
-  } catch (error) {
-    console.error('提交项目申请失败', error)
-    alert('网络错误，请稍后重试')
-  }
-}
-
-const handlePageSizeChange = () => {
-  currentPage.value = 1
-  totalPages.value = Math.ceil(projects.value.length / pageSize.value)
-}
-
-const changePage = (page: number) => {
-  if (page >= 1 && page <= totalPages.value) {
-    currentPage.value = page
-  }
-}
-
-const getPageNumbers = () => {
-  const pages = []
-  const maxVisiblePages = 5
-
-  if (totalPages.value <= maxVisiblePages) {
-    for (let i = 1; i <= totalPages.value; i++) {
-      pages.push(i)
-    }
-  } else {
-    const startPage = Math.max(1, currentPage.value - Math.floor(maxVisiblePages / 2))
-    const endPage = Math.min(totalPages.value, startPage + maxVisiblePages - 1)
-
-    if (startPage > 1) {
-      pages.push(1)
-      if (startPage > 2) {
-        pages.push('...')
-      }
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i)
-    }
-
-    if (endPage < totalPages.value) {
-      if (endPage < totalPages.value - 1) {
-        pages.push('...')
-      }
-      pages.push(totalPages.value)
-    }
-  }
-
-  return pages
-}
-
-const pendingRegistrations = ref<any[]>([])
-const loadingRegistrations = ref(false)
-
-const getPendingRegistrations = async () => {
-  loadingRegistrations.value = true
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch(
-      'http://localhost:5000/api/research-projects/registrations/pending',
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: 'include',
-      },
-    )
-    const result = await response.json()
-    if (result.success) {
-      pendingRegistrations.value = result.registrations
-    }
-  } catch (error) {
-    console.error('获取待处理报名失败', error)
-  } finally {
-    loadingRegistrations.value = false
-  }
-}
-
-const handleRegistration = async (registrationId: number, action: 'approve' | 'reject') => {
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch(
-      `http://localhost:5000/api/research-projects/registrations/${registrationId}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: 'include',
-        body: JSON.stringify({ registrationId, action }),
-      },
-    )
-    const result = await response.json()
-    if (result.success) {
-      alert(`报名请求${action === 'approve' ? '已批准' : '已拒绝'}`)
-      await getPendingRegistrations()
-    } else {
-      alert('处理失败: ' + result.message)
-    }
-  } catch (error) {
-    console.error('处理报名失败', error)
-    alert('网络错误，请稍后重试')
-  }
-}
-
-onMounted(async () => {
-  console.log('科研训练页面加载')
-  await getUserInfo()
-  await getProjects()
-  // 如果是学生，获取已确认课题
-  if (isStudent.value) {
-    await getConfirmedProjects()
-  }
-  // 如果是教师，获取我的课题
-  if (isTeacher.value) {
-    await getTeacherProjects()
-  }
-  // 计算总页数
-  totalPages.value = Math.ceil(projects.value.length / pageSize.value)
-  total.value = projects.value.length
-  // 如果是教师或管理员，获取待处理报名
-  if (isTeacher.value || user.value?.role === 'admin') {
-    await getPendingRegistrations()
-  }
-})
-</script>
 
 <style scoped>
 .train-view {
