@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -17,11 +18,7 @@ const handleSubmit = async (e: Event) => {
   errorMessage.value = ''
 
   try {
-    const baseURL = import.meta.env.MODE === 'development'
-      ? 'http://localhost:5000'
-      : ''
-
-    const response = await fetch(baseURL + '/api/login', {
+    const response = await fetch(buildURL('/api/login'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

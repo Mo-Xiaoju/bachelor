@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -49,7 +50,7 @@ const handleSubmit = async (e: Event) => {
       formData.append('proof', proofFile.value)
     }
     
-    const response = await fetch('http://localhost:5000/api/company-register', {
+    const response = await fetch(buildURL('/api/company-register'), {
       method: 'POST',
       credentials: 'include',
       body: formData
