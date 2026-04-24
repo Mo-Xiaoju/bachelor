@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { buildURL } from '../utils/api'
 
 const user = ref<any>(null)
 const loading = ref(true)
@@ -22,7 +23,7 @@ const getToken = (): string | null => {
 const checkAuth = async () => {
   const token = getToken()
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       credentials: 'include',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -56,7 +57,7 @@ const editContactInfo = () => {
 const saveContactInfo = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/user/profile', {
+    const response = await fetch(buildURL('/api/user/profile'), {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

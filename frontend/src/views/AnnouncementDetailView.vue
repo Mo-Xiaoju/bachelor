@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const route = useRoute()
 const announcement = ref<any>(null)
@@ -14,7 +15,7 @@ const getAnnouncementDetail = async () => {
 
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/announcements/${id}`, {
+    const response = await fetch(buildURL(`/api/announcements/${id}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -37,7 +38,7 @@ const getAnnouncementDetail = async () => {
 const downloadAttachment = async (attachmentId: number, filename: string) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/attachments/${attachmentId}`, {
+    const response = await fetch(buildURL(`/api/attachments/${attachmentId}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },

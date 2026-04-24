@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const user = ref<any>(null)
@@ -74,7 +75,7 @@ const internshipApplications = ref<any[]>([])
 const getInternships = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/internship/list', {
+    const response = await fetch(buildURL('/api/internship/list'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -101,7 +102,7 @@ const myInternships = ref([])
 const getStudentApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/student/applications', {
+    const response = await fetch(buildURL('/api/student/applications'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -131,7 +132,7 @@ const openConfirmDialog = (applicationId) => {
 const confirmInternship = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/student/confirm-internship', {
+    const response = await fetch(buildURL('/api/student/confirm-internship'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -228,7 +229,7 @@ const carouselStyle = computed(() => ({
 const getUserInfo = async () => {
   const token = sessionStorage.getItem('token')
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       credentials: 'include',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -288,7 +289,7 @@ const submitApplication = async () => {
     formData.append('resume', resumeFile.value)
     formData.append('internship_id', currentInternshipId.value.toString())
 
-    const response = await fetch('http://localhost:5000/api/internship/apply', {
+    const response = await fetch(buildURL('/api/internship/apply'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -385,7 +386,7 @@ const isEditing = ref(false)
 const getStudentLogs = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/student/logs', {
+    const response = await fetch(buildURL('/api/student/logs'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -429,12 +430,12 @@ const submitLog = async () => {
       formData.append('file', logForm.value.file)
     }
 
-    let url = 'http://localhost:5000/api/student/logs'
+    let url = buildURL('/api/student/logs')
     let method = 'POST'
 
     // 如果是编辑模式
     if (isEditing.value && editingLogId.value) {
-      url = `http://localhost:5000/api/student/logs/${editingLogId.value}`
+      url = buildURL(`/api/student/logs/${editingLogId.value}`)
       method = 'PUT'
     }
 
@@ -521,7 +522,7 @@ const goToPage = (page) => {
 const getCompanyApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/applications', {
+    const response = await fetch(buildURL('/api/company/applications'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -551,7 +552,7 @@ const getToken = () => {
 const reviewApplication = async (applicationId: number, action: 'approve' | 'reject') => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/application/process', {
+    const response = await fetch(buildURL('/api/company/application/process'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -865,7 +866,7 @@ onMounted(async () => {
             <div class="resume-section">
               <h5>学生简历</h5>
               <div v-if="currentApplication.resume_file" class="resume-content">
-                <iframe :src="`http://localhost:5000/api/internship/resume/${currentApplication.resume_file}?token=${getToken()}`" width="100%" height="600px" frameborder="0"></iframe>
+                <iframe :src="`${buildURL(`/api/internship/resume/${currentApplication.resume_file}`)}?token=${getToken()}`" width="100%" height="600px" frameborder="0"></iframe>
               </div>
               <div v-else class="empty-resume">
                 <p>暂无简历</p>
@@ -910,7 +911,7 @@ onMounted(async () => {
                 <div class="log-date">{{ log.date }}</div>
                 <div class="log-content">{{ log.content }}</div>
                 <div v-if="log.file" class="log-file">
-                  <a :href="`http://localhost:5000/api/student/logs/file/${log.file}?token=${getToken()}`" target="_blank">查看附件</a>
+                  <a :href="`${buildURL(`/api/student/logs/file/${log.file}`)}?token=${getToken()}`" target="_blank">查看附件</a>
                 </div>
                 <div v-if="log.id === logs[0].id" class="log-actions">
                   <button class="edit-btn" @click="editLog(log)">编辑</button>

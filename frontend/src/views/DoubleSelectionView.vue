@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 
@@ -71,7 +72,7 @@ const getToken = (): string | null => {
 const getUserInfo = async () => {
   const token = getToken()
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -90,7 +91,7 @@ const getUserInfo = async () => {
 const getCurrentStep = async () => {
   const token = getToken()
   try {
-    const response = await fetch('http://localhost:5000/api/double-selection/step', {
+    const response = await fetch(buildURL('/api/double-selection/step'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -110,7 +111,7 @@ const getTeachers = async () => {
   loading.value = true
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/teachers', {
+    const response = await fetch(buildURL('/api/teachers'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -131,7 +132,7 @@ const getTeachers = async () => {
 const getMySelections = async () => {
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/my-selection', {
+    const response = await fetch(buildURL('/api/my-selection'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -151,7 +152,7 @@ const getStudents = async () => {
   loading.value = true
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/students-for-teacher', {
+    const response = await fetch(buildURL('/api/students-for-teacher'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -176,7 +177,7 @@ const confirmStudent = async (selectionId: number) => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/confirm-selection', {
+    const response = await fetch(buildURL('/api/confirm-selection'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ const rejectStudent = async (selectionId: number) => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/reject-selection', {
+    const response = await fetch(buildURL('/api/reject-selection'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -244,7 +245,7 @@ const revokeSelection = async (selectionId: number) => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/revoke-selection', {
+    const response = await fetch(buildURL('/api/revoke-selection'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -299,7 +300,7 @@ const selectTeacher = async (teacherId: number) => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/select-teacher', {
+    const response = await fetch(buildURL('/api/select-teacher'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -337,7 +338,7 @@ const joinDoubleSelection = async () => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/double-selection/teachers/join', {
+    const response = await fetch(buildURL('/api/double-selection/teachers/join'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -377,7 +378,7 @@ const cancelSelection = async (selectionId: number) => {
   loading.value = true
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/cancel-selection', {
+    const response = await fetch(buildURL('/api/cancel-selection'), {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -474,7 +475,7 @@ const canViewTeachers = computed(() => {
 const getDoubleSelectionResult = async () => {
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/double-selection-result', {
+    const response = await fetch(buildURL('/api/double-selection-result'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -502,7 +503,7 @@ const getDoubleSelectionResult = async () => {
 const getDoubleSelectionTime = async () => {
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/double-selection/time', {
+    const response = await fetch(buildURL('/api/double-selection/time'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },

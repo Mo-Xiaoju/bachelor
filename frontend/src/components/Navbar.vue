@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -45,7 +46,7 @@ const checkAuth = async () => {
 
 
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -83,7 +84,7 @@ const logout = async () => {
 
     // 发送登出请求
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/logout', {
+    const response = await fetch(buildURL('/api/logout'), {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {}
     })

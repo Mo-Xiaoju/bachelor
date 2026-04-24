@@ -1,3 +1,76 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
+
+const router = useRouter()
+const user = ref<any>(null)
+const activeMenu = ref('我的团队')
+
+// 菜单项目
+const menuItems = [
+  { name: '我的团队', category: '团队管理' },
+  { name: '团队组建申请', category: '团队管理' }
+]
+
+// 从 sessionStorage 获取用户信息
+const getStoredUser = (): any => {
+  const userStr = sessionStorage.getItem('user')
+  return userStr ? JSON.parse(userStr) : null
+}
+
+// 检查用户认证状态
+const checkAuth = async () => {
+  // 首先尝试从 sessionStorage 读取
+  const storedUser = getStoredUser()
+  if (storedUser) {
+    user.value = storedUser
+    return
+  }
+
+  // 如果没有，尝试从后端验证
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/user/profile'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      if (result.success) {
+        user.value = result.user
+        sessionStorage.setItem('user', JSON.stringify(result.user))
+      } else {
+        // 认证失败，跳转到登录页
+        router.push('/login')
+      }
+    } else {
+      // 认证失败，跳转到登录页
+      router.push('/login')
+    }
+  } catch (error) {
+    console.error('认证失败', error)
+    router.push('/login')
+  }
+}
+
+// 处理菜单点击
+const handleMenuClick = (item: any) => {
+  activeMenu.value = item.name
+}
+
+// 组件挂载时检查认证状态
+onMounted(() => {
+  checkAuth()
+})
+</script>
+
+
+
+
 <template>
   <div class="team-view">
     <!-- 标题区域 -->
@@ -48,74 +121,7 @@
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
-const user = ref<any>(null)
-const activeMenu = ref('我的团队')
-
-// 菜单项目
-const menuItems = [
-  { name: '我的团队', category: '团队管理' },
-  { name: '团队组建申请', category: '团队管理' }
-]
-
-// 从 sessionStorage 获取用户信息
-const getStoredUser = (): any => {
-  const userStr = sessionStorage.getItem('user')
-  return userStr ? JSON.parse(userStr) : null
-}
-
-// 检查用户认证状态
-const checkAuth = async () => {
-  // 首先尝试从 sessionStorage 读取
-  const storedUser = getStoredUser()
-  if (storedUser) {
-    user.value = storedUser
-    return
-  }
-
-  // 如果没有，尝试从后端验证
-  try {
-    const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/user/profile', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: 'include',
-    })
-
-    if (response.ok) {
-      const result = await response.json()
-      if (result.success) {
-        user.value = result.user
-        sessionStorage.setItem('user', JSON.stringify(result.user))
-      } else {
-        // 认证失败，跳转到登录页
-        router.push('/login')
-      }
-    } else {
-      // 认证失败，跳转到登录页
-      router.push('/login')
-    }
-  } catch (error) {
-    console.error('认证失败', error)
-    router.push('/login')
-  }
-}
-
-// 处理菜单点击
-const handleMenuClick = (item: any) => {
-  activeMenu.value = item.name
-}
-
-// 组件挂载时检查认证状态
-onMounted(() => {
-  checkAuth()
-})
-</script>
 
 <style scoped>
 .team-view {

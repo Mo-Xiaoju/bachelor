@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 // 导入 china-area-data 包
 import chinaAreaData from 'china-area-data'
@@ -88,7 +89,7 @@ const checkAuth = async () => {
   }
 
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -111,7 +112,7 @@ const getCompanyInfo = async () => {
   loadingCompany.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/info', {
+    const response = await fetch(buildURL('/api/company/info'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -256,7 +257,7 @@ const companyDescription = ref('')
 const saveDescription = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/update-description', {
+    const response = await fetch(buildURL('/api/company/update-description'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -292,7 +293,7 @@ const openStudentManagement = () => {
 const getStudentApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/applications', {
+    const response = await fetch(buildURL('/api/company/applications'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -340,7 +341,7 @@ const reuploadProof = async () => {
     const formData = new FormData()
     formData.append('proof_file', reuploadFile.value)
 
-    const response = await fetch('http://localhost:5000/api/company/reupload-proof', {
+    const response = await fetch(buildURL('/api/company/reupload-proof'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -486,7 +487,7 @@ const publishInternship = async () => {
     const city = `${provinceName}${cityName}${districtName}`
     const location = internshipForm.value.address
 
-    const response = await fetch('http://localhost:5000/api/company/publish-internship', {
+    const response = await fetch(buildURL('/api/company/publish-internship'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -544,7 +545,7 @@ const publishInternship = async () => {
 const approveApplication = async (id: number) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/application/process', {
+    const response = await fetch(buildURL('/api/company/application/process'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -611,7 +612,7 @@ const viewResume = async (id: number) => {
     if (application) {
       const token = sessionStorage.getItem('token')
       const response = await fetch(
-        `http://localhost:5000/api/internship/resume/${application.resume_file}`,
+        buildURL(`/api/internship/resume/${application.resume_file}`),
         {
           method: 'GET',
           headers: {
@@ -720,7 +721,7 @@ const paginatedAnnouncements = computed(() => {
 const getUnreadCount = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/announcements/unread-count', {
+    const response = await fetch(buildURL('/api/announcements/unread-count'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -741,7 +742,7 @@ const getAnnouncements = async () => {
   loadingAnnouncements.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/announcements', {
+    const response = await fetch(buildURL('/api/announcements'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },

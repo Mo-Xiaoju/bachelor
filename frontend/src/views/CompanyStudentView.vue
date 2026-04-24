@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const user = ref<any>(null)
@@ -32,7 +33,7 @@ const checkAuth = async () => {
   }
 
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -55,7 +56,7 @@ const getConfirmedStudents = async () => {
   loadingStudents.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/company/confirmed-students', {
+    const response = await fetch(buildURL('/api/company/confirmed-students'), {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -82,7 +83,7 @@ const viewResume = async (resumeFile: string) => {
   try {
     const token = sessionStorage.getItem('token')
     const response = await fetch(
-      `http://localhost:5000/api/internship/resume/${resumeFile}`,
+      buildURL(`/api/internship/resume/${resumeFile}`),
       {
         method: 'GET',
         headers: {

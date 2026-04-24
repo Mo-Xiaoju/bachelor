@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const user = ref<any>(null)
@@ -40,7 +41,7 @@ const checkAuth = async () => {
   }
 
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -79,7 +80,7 @@ const getStudents = async () => {
   loadingStudents.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/teacher/students', {
+    const response = await fetch(buildURL('/api/teacher/students'), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -102,7 +103,7 @@ const getStudentLogs = async (studentId) => {
   loadingStudentLogs.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/teacher/student-logs/${studentId}`, {
+    const response = await fetch(buildURL(`/api/teacher/student-logs/${studentId}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -182,7 +183,7 @@ onMounted(async () => {
               <div class="log-date">{{ log.date }}</div>
               <div class="log-content">{{ log.content }}</div>
               <div v-if="log.file" class="log-file">
-                <a :href="`http://localhost:5000/api/student/logs/file/${log.file}?token=${getToken()}`" target="_blank">查看附件</a>
+                <a :href="`${buildURL(`/api/student/logs/file/${log.file}`)}?token=${getToken()}`" target="_blank">查看附件</a>
               </div>
             </div>
           </div>

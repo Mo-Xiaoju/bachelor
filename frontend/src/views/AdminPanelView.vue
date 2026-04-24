@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 import { RouterLink } from 'vue-router'
 
 const router = useRouter()
@@ -29,7 +30,7 @@ const getToken = (): string | null => {
 const getUserInfo = async () => {
   const token = getToken()
   try {
-    const response = await fetch('http://localhost:5000/api/check-auth', {
+    const response = await fetch(buildURL('/api/check-auth'), {
       credentials: 'include',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -54,7 +55,7 @@ const getUserInfo = async () => {
 const getCurrentStep = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/step', {
+    const response = await fetch(buildURL('/api/double-selection/step'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -86,7 +87,7 @@ const setStep = async (step: number) => {
     }
 
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/step', {
+    const response = await fetch(buildURL('/api/double-selection/step'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -132,7 +133,7 @@ const setStep = async (step: number) => {
 const processSelectionResults = async (): Promise<boolean> => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/process-selection-results', {
+    const response = await fetch(buildURL('/api/process-selection-results'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -171,7 +172,7 @@ const processSelectionResults = async (): Promise<boolean> => {
 const getDoubleSelectionTime = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/time', {
+    const response = await fetch(buildURL('/api/double-selection/time'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -206,7 +207,7 @@ const saveTimeSettings = async () => {
 
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/step', {
+    const response = await fetch(buildURL('/api/double-selection/step'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -613,7 +614,7 @@ const fetchAnnouncements = async () => {
   loadingAnnouncements.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/announcements', {
+    const response = await fetch(buildURL('/api/announcements'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -664,7 +665,7 @@ const publishAnnouncement = async () => {
       formData.append(`attachments[${index}]`, file)
     })
 
-    const response = await fetch('http://localhost:5000/api/announcements', {
+    const response = await fetch(buildURL('/api/announcements'), {
       method: 'POST',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -762,7 +763,7 @@ const saveEditAnnouncement = async () => {
     }
 
     const response = await fetch(
-      `http://localhost:5000/api/announcements/${editingAnnouncement.value.id}`,
+      buildURL(`/api/announcements/${editingAnnouncement.value.id}`),
       {
         method: 'PUT',
         headers: {
@@ -850,7 +851,7 @@ const removeAttachment = (index: number, isEditMode: boolean) => {
 const downloadAttachment = async (attachmentId: number, filename: string) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/attachments/${attachmentId}`, {
+    const response = await fetch(buildURL(`/api/attachments/${attachmentId}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -888,7 +889,7 @@ const deleteAnnouncement = async (announcementId: number) => {
 
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/announcements/${announcementId}`, {
+    const response = await fetch(buildURL(`/api/announcements/${announcementId}`), {
       method: 'DELETE',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -924,7 +925,7 @@ const fetchPendingProjects = async () => {
   loadingProjects.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/pending', {
+    const response = await fetch(buildURL('/api/research-projects/pending'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -954,7 +955,7 @@ const fetchPendingProjects = async () => {
 const approveProject = async (projectId: number) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/approve', {
+    const response = await fetch(buildURL('/api/research-projects/approve'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -990,7 +991,7 @@ const approveProject = async (projectId: number) => {
 const rejectProject = async (projectId: number) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/research-projects/reject', {
+    const response = await fetch(buildURL('/api/research-projects/reject'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1026,7 +1027,7 @@ const rejectProject = async (projectId: number) => {
 const viewProject = async (projectId: number) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/research-projects/${projectId}`, {
+    const response = await fetch(buildURL(`/api/research-projects/${projectId}`), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -1079,7 +1080,7 @@ const fetchDoubleSelectionTeachers = async () => {
   loadingTeachers.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/teachers/list', {
+    const response = await fetch(buildURL('/api/double-selection/teachers/list'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -1112,7 +1113,7 @@ const searchTeachersList = async () => {
   loadingSearch.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/users?role=teacher&keyword=${encodeURIComponent(searchKeyword.value)}`, {
+    const response = await fetch(buildURL(`/api/users?role=teacher&keyword=${encodeURIComponent(searchKeyword.value)}`), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -1154,7 +1155,7 @@ const addTeacherToDoubleSelection = async () => {
   loading.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/teachers/add', {
+    const response = await fetch(buildURL('/api/double-selection/teachers/add'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1201,7 +1202,7 @@ const updateTeacherQuota = async (teacherId: number, minQuota: number, maxQuota:
   loading.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/teachers/update', {
+    const response = await fetch(buildURL('/api/double-selection/teachers/update'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1247,7 +1248,7 @@ const removeTeacherFromDoubleSelection = async (teacherId: number) => {
   loading.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/double-selection/teachers/remove', {
+    const response = await fetch(buildURL('/api/double-selection/teachers/remove'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

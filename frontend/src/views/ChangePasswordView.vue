@@ -47,6 +47,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { buildURL } from '../utils/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -83,7 +84,7 @@ const handleSubmit = async (e: Event) => {
 
   try {
     const token = getToken()
-    const response = await fetch('http://localhost:5000/api/change-password', {
+    const response = await fetch(buildURL('/api/change-password'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
