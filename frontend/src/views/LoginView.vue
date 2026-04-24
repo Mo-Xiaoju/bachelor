@@ -17,7 +17,11 @@ const handleSubmit = async (e: Event) => {
   errorMessage.value = ''
 
   try {
-    const response = await fetch('http://localhost:5000/api/login', {
+    const baseURL = import.meta.env.MODE === 'development'
+      ? 'http://localhost:5000'
+      : ''
+
+    const response = await fetch(baseURL + '/api/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -117,7 +121,7 @@ const handleSubmit = async (e: Event) => {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
- 
+
   padding: 20px;
   box-sizing: border-box;
 }

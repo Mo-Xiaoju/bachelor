@@ -9,6 +9,10 @@ from functools import wraps
 import jwt
 import random
 import os
+# 加载 .env 环境变量（必须放在最顶部！）
+from dotenv import load_dotenv
+
+load_dotenv()  # 自动读取当前文件夹下的 .env 文件
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -3747,4 +3751,4 @@ with app.app_context():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, host='0.0.0.0')

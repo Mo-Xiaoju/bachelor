@@ -176,6 +176,11 @@ const evaluationForm = ref({
   rating: '5',
 })
 
+// 获取已确认的实习信息
+const confirmedInternship = computed(() => {
+  return myInternships.value.find(app => app.status === 'confirmed')
+})
+
 // 添加实习单位弹窗
 const showAddCompany = ref(false)
 const newCompany = ref({
@@ -247,10 +252,6 @@ const handleMenuClick = (item: any) => {
   // 如果点击的是实习审核，获取申请列表
   if (item.name === '实习审核') {
     getCompanyApplications()
-  }
-  // 如果点击的是我的实习，获取学生申请列表
-  if (item.name === '我的实习') {
-    getStudentApplications()
   }
   // 如果点击的是我的日志，获取日志列表
   if (item.name === '我的日志') {
@@ -352,6 +353,11 @@ const addCompany = () => {
 
 // 提交评价
 const submitEvaluation = () => {
+  if (confirmedInternship.value) {
+    // 使用已确认实习的信息
+    evaluationForm.value.company = confirmedInternship.value.company
+    evaluationForm.value.position = confirmedInternship.value.position
+  }
   successMessage.value = '评价提交成功'
   evaluationForm.value = {
     company: '',
@@ -587,13 +593,17 @@ const deleteCompany = (id: number) => {
   console.log('删除公司', id)
 }
 
-onMounted(() => {
-  getUserInfo()
+onMounted(async () => {
+  await getUserInfo()
   startCarousel()
   getInternships()
-  // 如果是学生且有实习，获取日志列表
+  // 如果是学生，获取实习申请列表
   if (isStudent.value) {
-    getStudentApplications()
+    await getStudentApplications()
+    // 如果有确认的实习，获取日志列表
+    if (hasInternshipCompany.value) {
+      getStudentLogs()
+    }
   }
 })
 </script>
@@ -744,15 +754,18 @@ onMounted(() => {
         <div v-else-if="activeMenu === '实习评价'" class="content-section">
           <div class="evaluation-form">
             <h3>提交实习评价</h3>
-            <div class="form-row">
+            <div v-if="confirmedInternship" class="form-row">
               <div class="form-item">
                 <label>实习单位：</label>
-                <input type="text" v-model="evaluationForm.company" placeholder="请输入实习单位" />
+                <div class="form-value">{{ confirmedInternship.company }}</div>
               </div>
               <div class="form-item">
                 <label>实习岗位：</label>
-                <input type="text" v-model="evaluationForm.position" placeholder="请输入实习岗位" />
+                <div class="form-value">{{ confirmedInternship.position }}</div>
               </div>
+            </div>
+            <div v-else class="no-internship">
+              <p>暂无已确认的实习记录，无法提交评价</p>
             </div>
             <div class="form-row">
               <div class="form-item full-width">
@@ -773,7 +786,7 @@ onMounted(() => {
               </div>
             </div>
             <div class="form-actions">
-              <button class="submit-btn" @click="submitEvaluation">提交评价</button>
+              <button class="submit-btn" @click="submitEvaluation" :disabled="!confirmedInternship">提交评价</button>
             </div>
           </div>
         </div>
@@ -1184,6 +1197,23 @@ onMounted(() => {
   min-height: 500px;
 }
 
+.evaluation-form {
+  background-color: #ffffff;
+  padding: 32px;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  margin-top: 20px;
+}
+
+.evaluation-form h3 {
+  margin: 0 0 24px 0;
+  color: #303133;
+  font-size: 20px;
+  font-weight: 600;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
 /* 表格样式 */
 .internship-table {
   width: 100%;
@@ -1442,14 +1472,17 @@ onMounted(() => {
 /* 表单样式 */
 .form-row {
   display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
+  gap: 24px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .form-item {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 250px;
 }
 
 .form-item.full-width {
@@ -1458,18 +1491,56 @@ onMounted(() => {
 
 .form-item label {
   margin-bottom: 8px;
-  color: #606266;
+  color: #303133;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .form-item input,
 .form-item select,
 .form-item textarea {
-  padding: 10px;
+  width: 100%;
+  padding: 12px;
   border: 1px solid #dcdfe6;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
-  transition: border-color 0.3s;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.form-value {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: #f8f9fa;
+  color: #333;
+  font-weight: 500;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.form-value:hover {
+  background-color: #f0f2f5;
+  border-color: #c0c4cc;
+}
+
+.no-internship {
+  padding: 24px;
+  background-color: #fef0f0;
+  border: 1px solid #fbc4c4;
+  border-radius: 8px;
+  color: #f56c6c;
+  margin-bottom: 24px;
+  text-align: center;
+  box-shadow: 0 2px 12px rgba(245, 108, 108, 0.1);
+}
+
+.no-internship p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .form-item input:focus,
@@ -1477,26 +1548,59 @@ onMounted(() => {
 .form-item textarea:focus {
   border-color: #409eff;
   outline: none;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+.form-item textarea {
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.5;
+}
+
+.form-item select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23909399' d='M6 9L1 4h10L6 9z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
 }
 
 .form-actions {
-  margin-top: 30px;
-  text-align: center;
+  margin-top: 32px;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 24px;
+  border-top: 1px solid #ebeef5;
 }
 
 .submit-btn {
-  padding: 12px 40px;
+  padding: 12px 32px;
   background-color: #409eff;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: 16px;
-  transition: background-color 0.3s;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.2);
 }
 
-.submit-btn:hover {
+.submit-btn:hover:not(:disabled) {
   background-color: #66b1ff;
+  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.2);
+}
+
+.submit-btn:disabled {
+  background-color: #c0c4cc;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* 审核按钮样式 */

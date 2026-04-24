@@ -526,9 +526,7 @@ onMounted(async () => {
     if (doubleSelectionResult.value) {
       // 学生已有双选导师，提示并回退到homeview
       alert('您已经有双选导师，无法再次进入双选界面')
-      setTimeout(() => {
-        router.push('/')
-      }, 100)
+      router.push('/')
       return
     }
   }

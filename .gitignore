@@ -68,3 +68,6 @@ __screenshots__/
 
 #push_to_aliyun.ps1
 push_to_aliyun.ps1
+
+#debug
+debug.log
