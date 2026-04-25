@@ -258,7 +258,7 @@ const resetDoubleSelection = async () => {
 
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/reset-double-selection', {
+    const response = await fetch(buildURL('/api/reset-double-selection'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -313,7 +313,7 @@ const fetchPendingCompanies = async () => {
   loadingCompanies.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/companies/pending', {
+    const response = await fetch(buildURL('/api/companies/pending'), {
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
       },
@@ -337,7 +337,7 @@ const fetchPendingCompanies = async () => {
 const downloadProof = async (filename: string) => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(`http://localhost:5000/api/companies/proof/${filename}`, {
+    const response = await fetch(buildURL(`/api/companies/proof/${filename}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -377,7 +377,7 @@ const reviewCompany = async (companyId: number, action: string) => {
   loading.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/companies/approve', {
+    const response = await fetch(buildURL('/api/companies/approve'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -443,7 +443,7 @@ const registerInnerUser = async () => {
       ...newUser.value,
     }
 
-    const response = await fetch('http://localhost:5000/api/innerregister', {
+    const response = await fetch(buildURL('/api/innerregister'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -511,7 +511,7 @@ const removeFile = () => {
 const downloadTemplate = async () => {
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch('http://localhost:5000/api/download-template', {
+    const response = await fetch(buildURL('/api/download-template'), {
       method: 'GET',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -563,7 +563,7 @@ const batchRegister = async () => {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
 
-    const response = await fetch('http://localhost:5000/api/batch-register', {
+    const response = await fetch(buildURL('/api/batch-register'), {
       method: 'POST',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
