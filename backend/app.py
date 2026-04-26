@@ -9,7 +9,6 @@ from functools import wraps
 import jwt
 import random
 import os
-# 加载 .env 环境变量（必须放在最顶部！）
 from dotenv import load_dotenv
 
 load_dotenv()  # 自动读取当前文件夹下的 .env 文件
@@ -38,6 +37,10 @@ os.makedirs(UPLOAD_FOLDER_RESUME, exist_ok=True)
 # 附件上传目录
 UPLOAD_FOLDER_ATTACHMENTS = os.path.join(BASE_DIR, 'uploads', 'attachments')
 os.makedirs(UPLOAD_FOLDER_ATTACHMENTS, exist_ok=True)
+
+# 实验报告上传目录
+UPLOAD_FOLDER_EXPERIMENT_REPORTS = os.path.join(BASE_DIR, 'uploads', 'experiment_reports')
+os.makedirs(UPLOAD_FOLDER_EXPERIMENT_REPORTS, exist_ok=True)
 # JWT 配置
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
 JWT_EXPIRATION_DELTA = timedelta(days=7)
@@ -105,10 +108,6 @@ class User(db.Model):
     id_card_last6 = db.Column(db.String(6), nullable=True)  # 身份证后六位（首次登录用）
     first_login = db.Column(db.Boolean, default=True)  # 是否首次登录
     
-    min_quota = db.Column(db.Integer, nullable=True)
-    max_quota = db.Column(db.Integer, nullable=True)
-    # 设置 current_quota 字段的默认值为 0
-    current_quota = db.Column(db.Integer, nullable=True, default=0)
     major = db.Column(db.String(255), nullable=True)
     department = db.Column(db.String(255), nullable=True)  # 院系
     contact = db.Column(db.String(255), nullable=True)  # 联系方式
@@ -151,6 +150,29 @@ class DoubleSelectionTeacher(db.Model):
     
     # 关联关系
     teacher = db.relationship('User', backref=db.backref('double_selection', uselist=False))
+
+class DoubleSelectionStudent(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)  # 关联的学生ID
+    status = db.Column(db.String(20), nullable=False, default='active')  # 状态：active/inactive
+    join_time = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # 加入时间
+    
+    # 关联关系
+    student = db.relationship('User', backref=db.backref('double_selection_student', uselist=False))
+
+# 实验报告表
+class ExperimentReport(db.Model):
+    __tablename__ = 'experiment_report'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    title = db.Column(db.String(100), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    file_url = db.Column(db.String(255), nullable=True)
+    create_time = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # 关联
+    student = db.relationship('User', backref=db.backref('experiment_reports', lazy=True))
 # 实习招聘表
 class Internship(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -521,6 +543,7 @@ def get_company_info():
                 'contact': company.contact,
                 'proof_file': company.proof_file,
                 'status': company.status,
+                'description': company.description,
                 'review_comment': company.review_comment,
                 'create_time': company.create_time.strftime('%Y-%m-%d %H:%M:%S') if company.create_time else None,
                 'review_time': company.review_time.strftime('%Y-%m-%d %H:%M:%S') if company.review_time else None
@@ -2157,6 +2180,202 @@ def remove_double_selection_teacher():
         db.session.rollback()
         return jsonify({'success': False, 'message': f'移除失败: {str(e)}'}), 500
 
+@app.route('/api/double-selection/teachers/update', methods=['POST'])
+@login_required
+def update_double_selection_teacher():
+    """管理员更新参与双选的导师名额"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    # 检查是否为管理员
+    if user.role != 'admin':
+        return jsonify({'success': False, 'message': '只有管理员可以更新导师名额'}), 403
+    
+    data = request.get_json()
+    teacher_id = data.get('teacher_id')
+    min_quota = data.get('min_quota')
+    max_quota = data.get('max_quota')
+    
+    if not teacher_id:
+        return jsonify({'success': False, 'message': '缺少教师ID'}), 400
+    
+    try:
+        # 查找双选导师记录
+        double_teacher = DoubleSelectionTeacher.query.filter_by(teacher_id=teacher_id).first()
+        if not double_teacher:
+            return jsonify({'success': False, 'message': '导师未参与双选'}), 404
+        
+        # 更新名额
+        if min_quota is not None:
+            double_teacher.min_quota = min_quota
+        if max_quota is not None:
+            double_teacher.max_quota = max_quota
+        
+        db.session.commit()
+        return jsonify({'success': True, 'message': '名额更新成功'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'更新失败: {str(e)}'}), 500
+
+# 搜索用户接口
+@app.route('/api/users', methods=['GET'])
+@login_required
+def search_users():
+    """搜索用户，支持按角色和关键词搜索"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    # 检查是否为管理员
+    if user.role != 'admin':
+        return jsonify({'success': False, 'message': '只有管理员可以搜索用户'}), 403
+    
+    # 获取查询参数
+    role = request.args.get('role')
+    keyword = request.args.get('keyword', '')
+    
+    # 构建查询
+    query = User.query
+    
+    # 按角色筛选
+    if role:
+        query = query.filter_by(role=role)
+    
+    # 按关键词筛选（匹配用户名、真实姓名或专业）
+    if keyword:
+        keyword = f'%{keyword}%'
+        query = query.filter(
+            db.or_(
+                User.username.like(keyword),
+                User.realname.like(keyword),
+                User.major.like(keyword)
+            )
+        )
+    
+    # 执行查询
+    users = query.all()
+    
+    # 构建返回数据
+    users_list = []
+    for user in users:
+        users_list.append({
+            'id': user.id,
+            'username': user.username,
+            'realname': user.realname,
+            'major': user.major,
+            'role': user.role
+        })
+    
+    return jsonify({'success': True, 'users': users_list})
+
+# 学生参与双选相关接口
+@app.route('/api/double-selection/students/list', methods=['GET'])
+@login_required
+def get_double_selection_students():
+    """获取参与双选的学生列表"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    # 检查是否为管理员
+    if user.role != 'admin':
+        return jsonify({'success': False, 'message': '只有管理员可以查看学生列表'}), 403
+    
+    # 获取所有参与双选的学生
+    double_students = DoubleSelectionStudent.query.all()
+    students = []
+    
+    for ds in double_students:
+        student = User.query.get(ds.student_id)
+        if student:
+            students.append({
+                'id': student.id,
+                'username': student.username,
+                'realname': student.realname,
+                'major': student.major
+            })
+    
+    return jsonify({'success': True, 'students': students})
+
+@app.route('/api/double-selection/students/add', methods=['POST'])
+@login_required
+def add_double_selection_student():
+    """管理员添加学生参与双选"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    # 检查是否为管理员
+    if user.role != 'admin':
+        return jsonify({'success': False, 'message': '只有管理员可以添加学生'}), 403
+    
+    # 获取双选阶段
+    step = DoubleSelectionStep.query.first()
+    current_step = step.current_step if step else 0
+    if current_step != 0:
+        return jsonify({'success': False, 'message': '当前不在报名阶段'}), 400
+    
+    # 获取请求数据
+    data = request.get_json()
+    student_id = data.get('student_id')
+    
+    if not student_id:
+        return jsonify({'success': False, 'message': '缺少学生ID'}), 400
+    
+    # 检查学生是否存在
+    student = User.query.get(student_id)
+    if not student or student.role != 'student':
+        return jsonify({'success': False, 'message': '学生不存在或不是学生角色'}), 404
+    
+    # 检查是否已经参与双选
+    existing = DoubleSelectionStudent.query.filter_by(student_id=student_id).first()
+    if existing:
+        return jsonify({'success': False, 'message': '该学生已经参与双选'}), 400
+    
+    try:
+        # 添加学生参与双选
+        double_student = DoubleSelectionStudent(student_id=student_id)
+        db.session.add(double_student)
+        db.session.commit()
+        return jsonify({'success': True, 'message': '学生添加成功'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'添加失败: {str(e)}'}), 500
+
+@app.route('/api/double-selection/students/remove', methods=['POST'])
+@login_required
+def remove_double_selection_student():
+    """管理员移除参与双选的学生"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    # 检查是否为管理员
+    if user.role != 'admin':
+        return jsonify({'success': False, 'message': '只有管理员可以移除学生'}), 403
+    
+    # 获取双选阶段
+    step = DoubleSelectionStep.query.first()
+    current_step = step.current_step if step else 0
+    if current_step != 0:
+        return jsonify({'success': False, 'message': '当前不在报名阶段'}), 400
+    
+    # 获取请求数据
+    data = request.get_json()
+    student_id = data.get('student_id')
+    
+    if not student_id:
+        return jsonify({'success': False, 'message': '缺少学生ID'}), 400
+    
+    # 查找双选学生记录
+    double_student = DoubleSelectionStudent.query.filter_by(student_id=student_id).first()
+    if not double_student:
+        return jsonify({'success': False, 'message': '该学生未参与双选'}), 404
+    
+    try:
+        db.session.delete(double_student)
+        db.session.commit()
+        return jsonify({'success': True, 'message': '移除成功'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'移除失败: {str(e)}'}), 500
+
 # 获取我的选择
 @app.route('/api/my-selection', methods=['GET'])
 @login_required
@@ -2373,13 +2592,17 @@ def confirm_selection():
         return jsonify({'success': False, 'message': '只能确认待确认的选择'}), 400
     
     # 检查教师名额是否已满
-    max_quota = user.max_quota or 5
-    if user.current_quota >= max_quota:
+    double_teacher = DoubleSelectionTeacher.query.filter_by(teacher_id=user_id).first()
+    if not double_teacher:
+        return jsonify({'success': False, 'message': '您未参与双选'}), 400
+    
+    max_quota = double_teacher.max_quota or 5
+    if double_teacher.current_quota >= max_quota:
         return jsonify({'success': False, 'message': '您的名额已满'}), 400
     
     # 确认选择
     selection.status = 'confirmed'
-    user.current_quota = (user.current_quota or 0) + 1
+    double_teacher.current_quota = (double_teacher.current_quota or 0) + 1
     
     # 注意：不再自动拒绝该学生的其他选择
     # 自动拒绝逻辑将在双选完成阶段统一处理
@@ -2423,7 +2646,9 @@ def reject_selection():
     # 拒绝选择
     selection.status = 'rejected'
     # 恢复导师名额
-    user.current_quota = max(0, user.current_quota - 1)
+    double_teacher = DoubleSelectionTeacher.query.filter_by(teacher_id=user_id).first()
+    if double_teacher:
+        double_teacher.current_quota = max(0, double_teacher.current_quota - 1)
     
     db.session.commit()
     
@@ -2464,7 +2689,9 @@ def revoke_selection():
     # 撤回选择
     selection.status = 'pending'
     # 恢复导师名额
-    user.current_quota = max(0, user.current_quota - 1)
+    double_teacher = DoubleSelectionTeacher.query.filter_by(teacher_id=user_id).first()
+    if double_teacher:
+        double_teacher.current_quota = max(0, double_teacher.current_quota - 1)
     
     db.session.commit()
     
@@ -2520,8 +2747,10 @@ def process_selection_results():
                 teacher.current_quota = max(0, (teacher.current_quota or 0) - 1)
         
         # 3. 处理最终阶段仍为rejected的学生，随机分配
-        # 获取所有学生
-        students = User.query.filter_by(role='student').all()
+        # 获取参与双选的学生（从double_selection_student表中）
+        double_students = DoubleSelectionStudent.query.filter_by(status='active').all()
+        students = [ds.student for ds in double_students]
+        
         # 获取参与双选的教师
         double_teachers = DoubleSelectionTeacher.query.filter_by(status='active').all()
         teachers = []
@@ -2595,6 +2824,11 @@ def process_selection_results():
         double_teachers = DoubleSelectionTeacher.query.filter_by(status='active').all()
         for dt in double_teachers:
             dt.current_quota = 0
+        
+        # 7. 清空除了双选结果表之外的相关表
+        DoubleSelectionTeacher.query.delete()
+        DoubleSelectionStudent.query.delete()
+        DoubleSelectionTime.query.delete()
 
         db.session.commit()
         
@@ -2623,12 +2857,21 @@ def reset_double_selection():
         # 2. 清空教师选择表
         TeacherSelection.query.delete()
         
-        # 3. 重置所有教师的当前名额
+        # 3. 清空双选导师表
+        DoubleSelectionTeacher.query.delete()
+        
+        # 4. 清空双选学生表
+        DoubleSelectionStudent.query.delete()
+        
+        # 5. 清空双选时间表
+        DoubleSelectionTime.query.delete()
+        
+        # 5. 重置所有教师的当前名额
         teachers = User.query.filter_by(role='teacher').all()
         for teacher in teachers:
             teacher.current_quota = 0
         
-        # 4. 重置双选阶段为未开始
+        # 6. 重置双选阶段为未开始
         step = DoubleSelectionStep.query.first()
         if step:
             step.current_step = 0
@@ -3673,7 +3916,11 @@ def get_internship_list():
 # 初始化数据库
 with app.app_context():
     db.create_all()
-    # 检查是否有管理员账号，没有则创建
+    
+    # 生成测试用户
+    print('开始生成测试用户...')
+    
+    # 1. 创建管理员账号
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(
@@ -3684,10 +3931,9 @@ with app.app_context():
             first_login=False
         )
         db.session.add(admin)
-        db.session.commit()
         print('管理员账号创建成功: admin/admin123')
     
-    # 创建示例学生账号（用于测试）
+    # 2. 创建示例学生账号
     student = User.query.filter_by(username='2021001').first()
     if not student:
         student = User(
@@ -3695,15 +3941,14 @@ with app.app_context():
             password_hash=bcrypt.generate_password_hash('123456').decode('utf-8'),
             id_card_last6='123456',
             realname='张三',
-            role='学生',
+            role='student',
             major='计算机科学',
             first_login=True
         )
         db.session.add(student)
-        db.session.commit()
         print('学生账号创建成功: 2021001/123456')
     
-    # 创建示例教师账号（用于测试）
+    # 3. 创建示例教师账号
     teacher = User.query.filter_by(username='T001').first()
     if not teacher:
         teacher = User(
@@ -3719,10 +3964,9 @@ with app.app_context():
             first_login=True
         )
         db.session.add(teacher)
-        db.session.commit()
         print('教师账号创建成功: T001/654321')
     
-    # 创建更多测试教师
+    # 4. 创建更多测试教师
     teachers_data = [
         {'username': 'T002', 'realname': '王老师', 'major': '软件工程'},
         {'username': 'T003', 'realname': '张老师', 'major': '人工智能'},
@@ -3745,9 +3989,233 @@ with app.app_context():
                 first_login=True
             )
             db.session.add(teacher)
+            print(f'教师账号创建成功: {t_data["username"]}/123456')
     
+    # 提交所有更改
     db.session.commit()
-    print('额外教师账号创建成功')
+    print('测试用户生成完成！')
+
+# 实验报告相关API
+@app.route('/api/experiment-reports', methods=['GET'])
+@login_required
+def get_experiment_reports():
+    """获取实验报告列表"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        # 无论是学生还是教师，在"我的实验报告"下都只显示自己的实验报告
+        reports = ExperimentReport.query.filter_by(student_id=user_id).order_by(ExperimentReport.create_time.desc()).all()
+        
+        result = []
+        for report in reports:
+            result.append({
+                'id': report.id,
+                'student_id': report.student_id,
+                'studentName': report.student.realname if report.student else '',
+                'studentUsername': report.student.username if report.student else '',
+                'title': report.title,
+                'content': report.content,
+                'date': report.date.strftime('%Y-%m-%d'),
+                'fileUrl': report.file_url,
+                'createTime': report.create_time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({'success': True, 'reports': result})
+    except Exception as e:
+        print(f"获取实验报告列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取实验报告列表失败: {str(e)}'}), 500
+
+@app.route('/api/experiment-reports', methods=['POST'])
+@login_required
+def upload_experiment_report():
+    """上传实验报告"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'student':
+            return jsonify({'success': False, 'message': '只有学生可以上传实验报告'}), 403
+        
+        # 获取表单数据
+        title = request.form.get('title')
+        content = request.form.get('content')
+        date_str = request.form.get('date')
+        
+        if not title or not content or not date_str:
+            return jsonify({'success': False, 'message': '请填写完整的实验报告信息'}), 400
+        
+        # 解析日期
+        try:
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'message': '日期格式不正确，请使用YYYY-MM-DD格式'}), 400
+        
+        # 处理文件上传
+        file_url = None
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                import uuid
+                filename = f"{uuid.uuid4()}_{file.filename}"
+                filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, filename)
+                file.save(filepath)
+                file_url = f"/uploads/experiment_reports/{filename}"
+        
+        # 创建实验报告记录
+        new_report = ExperimentReport(
+            student_id=user_id,
+            title=title,
+            content=content,
+            date=date,
+            file_url=file_url
+        )
+        
+        db.session.add(new_report)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '实验报告上传成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"上传实验报告失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'上传实验报告失败: {str(e)}'}), 500
+
+@app.route('/api/experiment-reports/<int:report_id>', methods=['PUT'])
+@login_required
+def update_experiment_report(report_id):
+    """编辑实验报告"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        # 查找实验报告
+        report = ExperimentReport.query.get(report_id)
+        if not report:
+            return jsonify({'success': False, 'message': '实验报告不存在'}), 404
+        
+        # 检查权限
+        if user.role != 'student' or report.student_id != user_id:
+            return jsonify({'success': False, 'message': '无权限编辑此实验报告'}), 403
+        
+        # 获取表单数据
+        title = request.form.get('title')
+        content = request.form.get('content')
+        date_str = request.form.get('date')
+        
+        if not title or not content or not date_str:
+            return jsonify({'success': False, 'message': '请填写完整的实验报告信息'}), 400
+        
+        # 解析日期
+        try:
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'message': '日期格式不正确，请使用YYYY-MM-DD格式'}), 400
+        
+        # 处理文件上传
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename:
+                # 删除旧文件
+                if report.file_url:
+                    old_filename = report.file_url.split('/')[-1]
+                    old_filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, old_filename)
+                    if os.path.exists(old_filepath):
+                        os.remove(old_filepath)
+                
+                # 保存新文件
+                import uuid
+                filename = f"{uuid.uuid4()}_{file.filename}"
+                filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, filename)
+                file.save(filepath)
+                report.file_url = f"/uploads/experiment_reports/{filename}"
+        
+        # 更新实验报告
+        report.title = title
+        report.content = content
+        report.date = date
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '实验报告更新成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"更新实验报告失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'更新实验报告失败: {str(e)}'}), 500
+
+@app.route('/api/experiment-reports/<int:report_id>', methods=['DELETE'])
+@login_required
+def delete_experiment_report(report_id):
+    """删除实验报告"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        # 查找实验报告
+        report = ExperimentReport.query.get(report_id)
+        if not report:
+            return jsonify({'success': False, 'message': '实验报告不存在'}), 404
+        
+        # 检查权限
+        if user.role != 'student' or report.student_id != user_id:
+            return jsonify({'success': False, 'message': '无权限删除此实验报告'}), 403
+        
+        # 删除文件
+        if report.file_url:
+            filename = report.file_url.split('/')[-1]
+            filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, filename)
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        
+        # 删除实验报告记录
+        db.session.delete(report)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '实验报告删除成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除实验报告失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除实验报告失败: {str(e)}'}), 500
+
+@app.route('/api/experiment-reports/students', methods=['GET'])
+@login_required
+def get_student_experiment_reports():
+    """获取学生实验报告列表（教师用）"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'teacher' and user.role != 'admin':
+            return jsonify({'success': False, 'message': '只有教师和管理员可以查看学生实验报告'}), 403
+        
+        if user.role == 'teacher':
+            # 教师只能查看自己学生的实验报告
+            # 从双选结果表中获取该教师的学生ID列表
+            teacher_students = DoubleSelectionResult.query.filter_by(teacher_id=user_id).all()
+            student_ids = [result.student_id for result in teacher_students]
+            # 只返回这些学生的实验报告
+            reports = ExperimentReport.query.filter(ExperimentReport.student_id.in_(student_ids)).order_by(ExperimentReport.create_time.desc()).all()
+        else:
+            # 管理员可以查看所有学生的实验报告
+            reports = ExperimentReport.query.order_by(ExperimentReport.create_time.desc()).all()
+        
+        result = []
+        for report in reports:
+            result.append({
+                'id': report.id,
+                'student_id': report.student_id,
+                'studentName': report.student.realname if report.student else '',
+                'studentUsername': report.student.username if report.student else '',
+                'title': report.title,
+                'content': report.content,
+                'date': report.date.strftime('%Y-%m-%d'),
+                'fileUrl': report.file_url,
+                'createTime': report.create_time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({'success': True, 'reports': result})
+    except Exception as e:
+        print(f"获取学生实验报告列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取学生实验报告列表失败: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

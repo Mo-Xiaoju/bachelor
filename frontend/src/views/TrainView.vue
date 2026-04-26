@@ -74,6 +74,7 @@ const menuItems = ref([
 const teacherMenuItems = ref([
   { category: '科研训练', name: '科研训练', path: 'train' },
   { category: '实验教学管理', name: '实验报告上传', path: 'report' },
+  { category: '实验教学管理', name: '学生实验报告', path: 'student-reports' },
   { category: '实验教学管理', name: '项目申请', path: 'project' },
   { category: '科研训练', name: '报名处理', path: 'registration' },
 ])
@@ -81,7 +82,6 @@ const teacherMenuItems = ref([
 const studentMenuItems = ref([
   { category: '科研训练', name: '科研训练', path: 'train' },
   { category: '实验教学管理', name: '实验报告上传', path: 'report' },
-  { category: '实验教学管理', name: '学生项目申请', path: 'student-project' },
 ])
 
 const adminMenuItems = ref([
@@ -197,9 +197,7 @@ const currentProjects = computed(() => {
   return projects.value.slice(start, end)
 })
 
-const handleMenuClick = (item: any) => {
-  activeMenu.value = item.name
-}
+
 
 const searchProjects = async () => {
   loading.value = true
@@ -392,6 +390,28 @@ const getPageNumbers = () => {
 const pendingRegistrations = ref<any[]>([])
 const loadingRegistrations = ref(false)
 
+// 实验报告相关
+const reports = ref<any[]>([])
+const reportForm = ref({
+  title: '',
+  content: '',
+  date: new Date().toISOString().split('T')[0],
+  file: null as File | null
+})
+const showReportDialog = ref(false)
+const showReportViewDialog = ref(false)
+const editingReportId = ref(null)
+const isEditing = ref(false)
+const currentReport = ref(null)
+const loadingReports = ref(false)
+const loadingReportFile = ref(false)
+const successMessage = ref('')
+const errorMessage = ref('')
+
+// 学生实验报告（教师用）
+const studentReports = ref<any[]>([])
+const loadingStudentReports = ref(false)
+
 const getPendingRegistrations = async () => {
   loadingRegistrations.value = true
   try {
@@ -441,6 +461,227 @@ const handleRegistration = async (registrationId: number, action: 'approve' | 'r
   } catch (error) {
     console.error('处理报名失败', error)
     alert('网络错误，请稍后重试')
+  }
+}
+
+// 获取实验报告列表
+const getReports = async () => {
+  loadingReports.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/experiment-reports'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      // 直接使用后端返回的报告列表，后端已经根据角色做了过滤
+      reports.value = result.reports
+    } else {
+      errorMessage.value = result.message || '获取实验报告列表失败'
+    }
+  } catch (error) {
+    console.error('获取实验报告列表失败', error)
+    errorMessage.value = '获取实验报告列表失败，请稍后重试'
+  } finally {
+    loadingReports.value = false
+  }
+}
+
+// 处理实验报告文件上传
+const handleReportFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    reportForm.value.file = target.files[0]
+  }
+}
+
+// 提交实验报告
+const submitReport = async () => {
+  if (!reportForm.value.title || !reportForm.value.content) {
+    errorMessage.value = '请填写实验报告标题和内容'
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const formData = new FormData()
+    formData.append('title', reportForm.value.title)
+    formData.append('content', reportForm.value.content)
+    formData.append('date', reportForm.value.date)
+    if (reportForm.value.file) {
+      formData.append('file', reportForm.value.file)
+    }
+
+    let url = buildURL('/api/experiment-reports')
+    let method = 'POST'
+
+    // 如果是编辑模式
+    if (isEditing.value && editingReportId.value) {
+      url = buildURL(`/api/experiment-reports/${editingReportId.value}`)
+      method = 'PUT'
+    }
+
+    const response = await fetch(url, {
+      method: method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      successMessage.value = isEditing.value ? '实验报告编辑成功' : '实验报告提交成功'
+      showReportDialog.value = false
+      reportForm.value = {
+        title: '',
+        content: '',
+        date: new Date().toISOString().split('T')[0],
+        file: null
+      }
+      isEditing.value = false
+      editingReportId.value = null
+      // 重新获取实验报告列表
+      await getReports()
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
+    } else {
+      errorMessage.value = result.message || (isEditing.value ? '编辑失败' : '提交失败')
+    }
+  } catch (error) {
+    console.error(isEditing.value ? '编辑失败' : '提交失败', error)
+    errorMessage.value = isEditing.value ? '编辑失败，请稍后重试' : '提交失败，请稍后重试'
+  }
+}
+
+// 编辑实验报告
+const editReport = (report: any) => {
+  // 填充表单
+  reportForm.value = {
+    title: report.title,
+    content: report.content,
+    date: report.date,
+    file: null
+  }
+  editingReportId.value = report.id
+  isEditing.value = true
+  showReportDialog.value = true
+}
+
+// 查看实验报告
+const viewReport = (report: any) => {
+  currentReport.value = report
+  showReportViewDialog.value = true
+}
+
+
+
+// 下载实验报告文件
+const downloadReportFile = async (fileUrl: string) => {
+  loadingReportFile.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(fileUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error('文件下载失败')
+    }
+
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileUrl.split('/').pop() || 'experiment-report'
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+  } catch (error) {
+    console.error('文件下载失败', error)
+    errorMessage.value = '文件下载失败，请稍后重试'
+  } finally {
+    loadingReportFile.value = false
+  }
+}
+
+// 删除实验报告
+const deleteReport = async (reportId: number) => {
+  if (!confirm('确定要删除这份实验报告吗？')) {
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/experiment-reports/${reportId}`), {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      successMessage.value = '实验报告删除成功'
+      // 重新获取实验报告列表
+      await getReports()
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
+    } else {
+      errorMessage.value = result.message || '删除失败'
+    }
+  } catch (error) {
+    console.error('删除失败', error)
+    errorMessage.value = '删除失败，请稍后重试'
+  }
+}
+
+// 获取学生实验报告列表（教师用）
+const getStudentReports = async () => {
+  loadingStudentReports.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/experiment-reports/students'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      studentReports.value = result.reports
+    } else {
+      errorMessage.value = result.message || '获取学生实验报告列表失败'
+    }
+  } catch (error) {
+    console.error('获取学生实验报告列表失败', error)
+    errorMessage.value = '获取学生实验报告列表失败，请稍后重试'
+  } finally {
+    loadingStudentReports.value = false
+  }
+}
+
+// 处理菜单点击
+const handleMenuClick = (item: any) => {
+  activeMenu.value = item.name
+  // 如果点击的是实验报告上传，获取实验报告列表
+  if (item.name === '实验报告上传') {
+    getReports()
+  }
+  // 如果点击的是学生实验报告，获取学生实验报告列表
+  if (item.name === '学生实验报告') {
+    getStudentReports()
   }
 }
 
@@ -790,14 +1031,190 @@ onMounted(async () => {
         <!-- 实验报告上传页面 -->
         <div v-else-if="activeMenu === '实验报告上传'" class="content-section">
           <h2>实验报告上传</h2>
-          <p>欢迎来到实验报告上传页面</p>
+
+          <!-- 成功/错误消息 -->
+          <div v-if="successMessage" class="success-message">
+            {{ successMessage }}
+          </div>
+          <div v-if="errorMessage" class="error-message">
+            {{ errorMessage }}
+          </div>
+
+          <!-- 上传按钮 -->
+          <div class="upload-section">
+            <button class="upload-btn" @click="showReportDialog = true">
+              上传实验报告
+            </button>
+          </div>
+
+          <!-- 实验报告列表 -->
+          <div class="report-list">
+            <h3>我的实验报告</h3>
+            <div v-if="loadingReports" class="loading">
+              <p>加载中...</p>
+            </div>
+            <div v-else-if="reports.length === 0" class="empty">
+              <p>暂无实验报告</p>
+            </div>
+            <table v-else class="report-table">
+              <thead>
+                <tr>
+                  <th>标题</th>
+                  <th>内容</th>
+                  <th>日期</th>
+                  <th>文件</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="report in reports" :key="report.id">
+                  <td>{{ report.title }}</td>
+                  <td>{{ report.content.substring(0, 50) }}{{ report.content.length > 50 ? '...' : '' }}</td>
+                  <td>{{ report.date }}</td>
+                  <td>
+                    <a v-if="report.fileUrl" @click.prevent="viewReport(report)" class="file-link">
+                      查看文件
+                    </a>
+                    <span v-else>-</span>
+                  </td>
+                  <td class="operation">
+                    <button class="edit-btn" @click="editReport(report)">
+                      编辑
+                    </button>
+                    <button class="delete-btn" @click="deleteReport(report.id)">
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 实验报告上传/编辑弹窗 -->
+          <div v-if="showReportDialog" class="report-modal">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>{{ isEditing ? '编辑实验报告' : '上传实验报告' }}</h3>
+                <button class="close-btn" @click="showReportDialog = false">&times;</button>
+              </div>
+              <div class="modal-body">
+                <form @submit.prevent="submitReport">
+                  <div class="form-item">
+                    <label>标题：</label>
+                    <input type="text" v-model="reportForm.title" placeholder="请输入实验报告标题" required />
+                  </div>
+                  <div class="form-item">
+                    <label>内容：</label>
+                    <textarea v-model="reportForm.content" placeholder="请输入实验报告内容" rows="4" required></textarea>
+                  </div>
+                  <div class="form-item">
+                    <label>日期：</label>
+                    <input type="date" v-model="reportForm.date" required />
+                  </div>
+                  <div class="form-item">
+                    <label>附件：</label>
+                    <input type="file" @change="handleReportFileChange" />
+                  </div>
+                  <div class="form-actions">
+                    <button type="button" class="cancel-btn" @click="showReportDialog = false">取消</button>
+                    <button type="submit" class="submit-btn">{{ isEditing ? '保存' : '提交' }}</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        <!-- 学生项目申请页面 -->
-        <div v-else-if="activeMenu === '学生项目申请'" class="content-section">
-          <h2>学生项目申请</h2>
-          <p>学生项目申请功能开发中...</p>
+        <!-- 学生实验报告页面（教师用） -->
+        <div v-else-if="activeMenu === '学生实验报告'" class="content-section">
+          <h2>学生实验报告</h2>
+
+          <!-- 成功/错误消息 -->
+          <div v-if="successMessage" class="success-message">
+            {{ successMessage }}
+          </div>
+          <div v-if="errorMessage" class="error-message">
+            {{ errorMessage }}
+          </div>
+
+          <!-- 学生实验报告列表 -->
+          <div class="student-report-list">
+            <h3>学生实验报告</h3>
+            <div v-if="loadingStudentReports" class="loading">
+              <p>加载中...</p>
+            </div>
+            <div v-else-if="studentReports.length === 0" class="empty">
+              <p>暂无学生实验报告</p>
+            </div>
+            <table v-else class="report-table">
+              <thead>
+                <tr>
+                  <th>学生姓名</th>
+                  <th>学号</th>
+                  <th>报告标题</th>
+                  <th>内容</th>
+                  <th>日期</th>
+                  <th>文件</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="report in studentReports" :key="report.id">
+                  <td>{{ report.studentName }}</td>
+                  <td>{{ report.studentUsername }}</td>
+                  <td>{{ report.title }}</td>
+                  <td>{{ report.content.substring(0, 50) }}{{ report.content.length > 50 ? '...' : '' }}</td>
+                  <td>{{ report.date }}</td>
+                  <td>
+                    <a v-if="report.fileUrl" @click.prevent="viewReport(report)" class="file-link">
+                      查看文件
+                    </a>
+                    <span v-else>-</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
+
+        <!-- 实验报告查看弹窗 -->
+          <div v-if="showReportViewDialog" class="report-modal">
+            <div class="modal-content" style="max-width: 800px;">
+              <div class="modal-header">
+                <h3>查看实验报告</h3>
+                <button class="close-btn" @click="showReportViewDialog = false">&times;</button>
+              </div>
+              <div class="modal-body">
+                <div v-if="currentReport" class="report-view">
+                  <div class="report-info">
+                    <h4>{{ currentReport.title }}</h4>
+                    <p class="report-date">日期：{{ currentReport.date }}</p>
+                    <p class="report-student" v-if="currentReport.studentName">
+                      学生：{{ currentReport.studentName }} ({{ currentReport.studentUsername }})
+                    </p>
+                  </div>
+                  <div class="report-content">
+                    <h5>内容：</h5>
+                    <p>{{ currentReport.content }}</p>
+                  </div>
+                  <div class="report-file" v-if="currentReport.fileUrl">
+                    <h5>附件：</h5>
+                    <!-- 只保留下载按钮 -->
+                    <button
+                      class="view-file-btn"
+                      @click="downloadReportFile(currentReport.fileUrl)"
+                      :disabled="loadingReportFile"
+                    >
+                      <span v-if="loadingReportFile">加载中...</span>
+                      <span v-else>下载附件</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
 
         <!-- 报名处理页面 -->
         <div v-else-if="activeMenu === '报名处理'" class="content-section">
@@ -1419,6 +1836,320 @@ onMounted(async () => {
   color: #999;
 }
 
+/* 实验报告相关样式 */
+.upload-section {
+  margin-bottom: 20px;
+}
+
+.upload-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.report-list,
+.student-report-list {
+  margin-top: 20px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.report-table th,
+.report-table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.report-table th {
+  background: #f8f9ff;
+  font-weight: 600;
+  color: #2c3e50;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.report-table td {
+  color: #666;
+}
+
+.report-table tr:hover {
+  background: rgba(102, 126, 234, 0.05);
+}
+
+.file-link {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.file-link:hover {
+  text-decoration: underline;
+}
+
+.edit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-right: 10px;
+}
+
+.edit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.delete-btn {
+  background: #ff4d4f;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.delete-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 77, 79, 0.3);
+}
+
+.success-message {
+  background: #f6ffed;
+  border: 1px solid #b7eb8f;
+  color: #52c41a;
+  padding: 10px 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.error-message {
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  color: #ff4d4f;
+  padding: 10px 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+  font-size: 14px;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+  font-size: 14px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  border: 1px dashed #e0e0e0;
+}
+
+.report-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  margin: 20px;
+}
+
+.modal-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px 30px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: white;
+  border: none;
+  padding: 0;
+}
+
+.modal-body {
+  padding: 30px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* 实验报告查看样式 */
+.report-view {
+  line-height: 1.6;
+}
+
+.report-info {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.report-info h4 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.report-date {
+  margin: 0 0 5px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.report-student {
+  margin: 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.report-content {
+  margin-bottom: 20px;
+}
+
+.report-content h5 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.report-content p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #666;
+  line-height: 1.6;
+}
+
+.report-file {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.report-file h5 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.view-file-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.view-file-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.view-file-btn:disabled {
+  background: #90CAF9;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.cancel-btn {
+  background: #f5f5f5;
+  color: #333;
+  border: 1px solid #e0e0e0;
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+  background: #e0e0e0;
+}
+
+.submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .main-content {
@@ -1438,12 +2169,15 @@ onMounted(async () => {
     align-items: stretch;
   }
 
-  .project-table {
+  .project-table,
+  .report-table {
     font-size: 12px;
   }
 
   .project-table th,
-  .project-table td {
+  .project-table td,
+  .report-table th,
+  .report-table td {
     padding: 8px;
   }
 }

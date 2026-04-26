@@ -106,12 +106,12 @@ const getCurrentStep = async () => {
   }
 }
 
-// 获取导师列表
+// 获取导师列表（从双选系统中）
 const getTeachers = async () => {
   loading.value = true
   try {
     const token = getToken()
-    const response = await fetch(buildURL('/api/teachers'), {
+    const response = await fetch(buildURL('/api/double-selection/teachers/list'), {
       credentials: 'include',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
@@ -454,7 +454,7 @@ const currentTeacherQuota = computed(() => {
     if (currentTeacher) {
       return {
         currentQuota: currentTeacher.current_quota || 0,
-        maxQuota: currentTeacher.max_quota || 5 // 默认最大名额为5
+        maxQuota: currentTeacher.max_quota !== undefined ? currentTeacher.max_quota : 5 // 只有当max_quota未定义时才使用默认值5
       }
     }
   }
@@ -682,14 +682,14 @@ onMounted(async () => {
                 <span v-else-if="selectedTeacherIds.includes(teacher.id)" class="selected-tag">
                   已选择
                 </span>
-                <span v-else-if="teacher.currentQuota >= teacher.maxQuota" class="full-tag"
+                <span v-else-if="(teacher.current_quota || 0) >= (teacher.max_quota || 0)" class="full-tag"
                   >名额已满</span
                 >
                 <span v-else-if="mySelections.length >= 2" class="full-tag">已选两名导师</span>
                 <span v-else-if="selectedTeacherIds.includes(teacher.id)" class="selected-tag">
                   已选择
                 </span>
-                <span v-else-if="teacher.currentQuota >= teacher.maxQuota" class="full-tag"
+                <span v-else-if="(teacher.current_quota || 0) >= (teacher.max_quota || 0)" class="full-tag"
                   >名额已满</span
                 >
               </div>
