@@ -78,6 +78,47 @@ const setStep = async (step: number) => {
   errorMessage.value = ''
 
   try {
+    // 检查双选阶段是否只能一步步切换
+    if (step !== currentStep.value + 1 && step !== currentStep.value - 1) {
+      // 只有在当前阶段为3时可以直接回到0
+      if (!(currentStep.value === 3 && step === 0)) {
+        errorMessage.value = '双选阶段只能一步步切换，不能跳步'
+        loading.value = false
+        return
+      }
+    }
+    // 如果设置为阶段1（学生选导师），检查学生人数是否大于导师max quota之和
+    if (step === 1) {
+      const token = sessionStorage.getItem('token')
+
+      // 获取参与双选的学生人数
+      const studentsResponse = await fetch(buildURL('/api/double-selection/students/list'), {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        credentials: 'include',
+      })
+      const studentsResult = await studentsResponse.json()
+      const studentCount = studentsResult.success ? studentsResult.students.length : 0
+
+      // 获取参与双选的导师及其max quota
+      const teachersResponse = await fetch(buildURL('/api/double-selection/teachers/list'), {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        credentials: 'include',
+      })
+      const teachersResult = await teachersResponse.json()
+      const totalMaxQuota = teachersResult.success
+        ? teachersResult.teachers.reduce((sum: number, teacher: any) => sum + (teacher.max_quota || 0), 0)
+        : 0
+
+      // 检查学生人数是否大于导师max quota之和
+      if (studentCount > totalMaxQuota) {
+        alert(`警告：参与双选的学生人数(${studentCount})大于导师最大名额总和(${totalMaxQuota})，可能无法为所有学生分配导师`)
+      }
+    }
+
     // 如果设置为阶段3（双选完成），先处理双选结果
     if (step === 3) {
       const processResult = await processSelectionResults()
@@ -152,6 +193,9 @@ const processSelectionResults = async (): Promise<boolean> => {
     const result = await response.json()
     if (result.success) {
       successMessage.value = '双选结果处理成功'
+      // 清空导师管理和学生管理的内容
+      doubleSelectionTeachers.value = []
+      doubleSelectionStudents.value = []
       // 3秒后清除成功消息
       setTimeout(() => {
         successMessage.value = ''
@@ -277,6 +321,9 @@ const resetDoubleSelection = async () => {
     const result = await response.json()
     if (result.success) {
       successMessage.value = '双选数据重置成功'
+      // 清空导师管理和学生管理的内容
+      doubleSelectionTeachers.value = []
+      doubleSelectionStudents.value = []
       // 3秒后清除成功消息
       setTimeout(() => {
         successMessage.value = ''
@@ -305,6 +352,10 @@ const switchTab = (tab: string) => {
   }
   if (tab === 'company-review') {
     fetchPendingCompanies()
+  }
+  if (tab === 'double-selection') {
+    fetchDoubleSelectionTeachers()
+    fetchDoubleSelectionStudents()
   }
 }
 
@@ -1075,6 +1126,91 @@ const selectedTeacher = ref<any>(null)
 const minQuota = ref(0)
 const maxQuota = ref(5)
 
+// 学生管理相关
+const doubleSelectionStudents = ref<any[]>([])
+const loadingStudents = ref(false)
+const showAddStudentDialog = ref(false)
+const searchStudentKeyword = ref('')
+const selectedStudent = ref<any>(null)
+const searchStudents = ref<any[]>([])
+const loadingStudentSearch = ref(false)
+const selectedStudents = ref<any[]>([])
+const isBatchMode = ref(false)
+const searchDoubleSelectionTeacher = ref('')
+const searchDoubleSelectionStudent = ref('')
+
+// 导师分页
+const teacherCurrentPage = ref(1)
+const teacherPageSize = ref(10)
+
+// 学生分页
+const studentCurrentPage = ref(1)
+const studentPageSize = ref(10)
+
+// 过滤后的双选导师列表
+const filteredDoubleSelectionTeachers = computed(() => {
+  if (!searchDoubleSelectionTeacher.value.trim()) {
+    return doubleSelectionTeachers.value
+  }
+  const keyword = searchDoubleSelectionTeacher.value.toLowerCase()
+  return doubleSelectionTeachers.value.filter(teacher =>
+    teacher.realname.toLowerCase().includes(keyword) ||
+    teacher.username.toLowerCase().includes(keyword) ||
+    teacher.major.toLowerCase().includes(keyword)
+  )
+})
+
+// 分页后的导师列表
+const paginatedTeachers = computed(() => {
+  const start = (teacherCurrentPage.value - 1) * teacherPageSize.value
+  const end = start + teacherPageSize.value
+  return filteredDoubleSelectionTeachers.value.slice(start, end)
+})
+
+// 过滤后的双选学生列表
+const filteredDoubleSelectionStudents = computed(() => {
+  if (!searchDoubleSelectionStudent.value.trim()) {
+    return doubleSelectionStudents.value
+  }
+  const keyword = searchDoubleSelectionStudent.value.toLowerCase()
+  return doubleSelectionStudents.value.filter(student =>
+    student.realname.toLowerCase().includes(keyword) ||
+    student.username.toLowerCase().includes(keyword) ||
+    student.major.toLowerCase().includes(keyword)
+  )
+})
+
+// 分页后的学生列表
+const paginatedStudents = computed(() => {
+  const start = (studentCurrentPage.value - 1) * studentPageSize.value
+  const end = start + studentPageSize.value
+  return filteredDoubleSelectionStudents.value.slice(start, end)
+})
+
+// 搜索已添加的双选导师
+const searchDoubleSelectionTeachers = () => {
+  // 重置页码
+  teacherCurrentPage.value = 1
+  // 过滤逻辑已在computed中实现，这里可以添加额外的搜索逻辑
+}
+
+// 搜索已添加的双选学生
+const searchDoubleSelectionStudents = () => {
+  // 重置页码
+  studentCurrentPage.value = 1
+  // 过滤逻辑已在computed中实现，这里可以添加额外的搜索逻辑
+}
+
+// 导师分页变化
+const handleTeacherPageChange = (page: number) => {
+  teacherCurrentPage.value = page
+}
+
+// 学生分页变化
+const handleStudentPageChange = (page: number) => {
+  studentCurrentPage.value = page
+}
+
 // 获取参与双选的导师列表
 const fetchDoubleSelectionTeachers = async () => {
   loadingTeachers.value = true
@@ -1089,6 +1225,8 @@ const fetchDoubleSelectionTeachers = async () => {
     const result = await response.json()
     if (result.success) {
       doubleSelectionTeachers.value = result.teachers
+      // 检查教师名额与学生人数的关系
+      checkQuotaAndStudents()
     } else {
       errorMessage.value = result.message
     }
@@ -1097,6 +1235,281 @@ const fetchDoubleSelectionTeachers = async () => {
     errorMessage.value = '网络错误'
   } finally {
     loadingTeachers.value = false
+  }
+}
+
+// 获取参与双选的学生列表
+const fetchDoubleSelectionStudents = async () => {
+  loadingStudents.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/double-selection/students/list'), {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      doubleSelectionStudents.value = result.students
+      // 检查教师名额与学生人数的关系
+      checkQuotaAndStudents()
+    } else {
+      errorMessage.value = result.message
+    }
+  } catch (error) {
+    console.error('获取学生列表失败', error)
+    errorMessage.value = '网络错误'
+  } finally {
+    loadingStudents.value = false
+  }
+}
+
+// 搜索学生
+const searchStudentsList = async () => {
+  if (!searchStudentKeyword.value.trim()) {
+    searchStudents.value = []
+    return
+  }
+
+  loadingStudentSearch.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    // 将通配符*替换为%，后端SQL LIKE查询需要
+    const keyword = searchStudentKeyword.value.replace(/\*/g, '%')
+    const response = await fetch(buildURL(`/api/users?role=student&keyword=${encodeURIComponent(keyword)}`), {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      // 过滤掉已经参与双选的学生
+      const existingStudentIds = doubleSelectionStudents.value.map(s => s.id)
+      searchStudents.value = result.users.filter((user: any) => !existingStudentIds.includes(user.id))
+
+      // 检查是否使用了通配符
+      if (searchStudentKeyword.value.includes('*')) {
+        successMessage.value = `找到 ${searchStudents.value.length} 个匹配的学生`
+        setTimeout(() => {
+          successMessage.value = ''
+        }, 3000)
+      }
+    } else {
+      errorMessage.value = result.message
+    }
+  } catch (error) {
+    console.error('搜索学生失败', error)
+    errorMessage.value = '网络错误'
+  } finally {
+    loadingStudentSearch.value = false
+  }
+}
+
+// 选择单个学生
+const selectStudent = (student: any) => {
+  if (!isBatchMode.value) {
+    // 非批量模式，只能选择一名学生
+    selectedStudent.value = student
+  } else {
+    // 批量模式，添加到选中列表
+    const index = selectedStudents.value.findIndex(s => s.id === student.id)
+    if (index > -1) {
+      selectedStudents.value.splice(index, 1)
+    } else {
+      selectedStudents.value.push(student)
+    }
+  }
+}
+
+// 监听批量选择模式变化
+import { watch } from 'vue'
+
+watch(isBatchMode, (newValue) => {
+  if (!newValue) {
+    // 切换到非批量模式时，清空批量选择列表
+    selectedStudents.value = []
+  }
+})
+
+// 切换学生选择状态（批量模式下）
+const toggleStudentSelection = (student: any) => {
+  const index = selectedStudents.value.findIndex(s => s.id === student.id)
+  if (index > -1) {
+    selectedStudents.value.splice(index, 1)
+  } else {
+    selectedStudents.value.push(student)
+  }
+}
+
+// 全选/取消全选
+const toggleSelectAll = () => {
+  if (selectedStudents.value.length === searchStudents.value.length) {
+    // 取消全选
+    selectedStudents.value = []
+  } else {
+    // 全选
+    selectedStudents.value = [...searchStudents.value]
+  }
+}
+
+// 添加学生参与双选
+const addStudentToDoubleSelection = async () => {
+  if (!isBatchMode.value && !selectedStudent.value) {
+    errorMessage.value = '请选择学生'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+    return
+  }
+
+  if (isBatchMode.value && selectedStudents.value.length === 0) {
+    errorMessage.value = '请至少选择一个学生'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+    return
+  }
+
+  // 检查双选阶段
+  await getCurrentStep()
+  if (currentStep.value !== 0) {
+    alert('当前不在报名阶段，无法添加学生')
+    return
+  }
+
+  loading.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+
+    if (isBatchMode.value) {
+      // 批量添加学生
+      let successCount = 0
+      let totalCount = selectedStudents.value.length
+
+      for (const student of selectedStudents.value) {
+        const response = await fetch(buildURL('/api/double-selection/students/add'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: token ? `Bearer ${token}` : '',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            student_id: student.id
+          })
+        })
+        const result = await response.json()
+        if (result.success) {
+          successCount++
+        }
+      }
+
+      successMessage.value = `成功添加 ${successCount} 名学生，共 ${totalCount} 名`
+    } else {
+      // 单个添加学生
+      const response = await fetch(buildURL('/api/double-selection/students/add'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          student_id: selectedStudent.value.id
+        })
+      })
+      const result = await response.json()
+      if (result.success) {
+        successMessage.value = '学生添加成功'
+      } else {
+        errorMessage.value = result.message
+        setTimeout(() => {
+          errorMessage.value = ''
+        }, 3000)
+        loading.value = false
+        return
+      }
+    }
+
+    await fetchDoubleSelectionStudents()
+    // 重置表单
+    selectedStudent.value = null
+    selectedStudents.value = []
+    showAddStudentDialog.value = false
+    setTimeout(() => {
+      successMessage.value = ''
+    }, 3000)
+  } catch (error) {
+    console.error('添加学生失败', error)
+    errorMessage.value = '网络错误，请稍后重试'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 移除学生
+const removeStudentFromDoubleSelection = async (studentId: number) => {
+  if (!confirm('确定要移除这位学生吗？')) {
+    return
+  }
+
+  loading.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/double-selection/students/remove'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ student_id: studentId })
+    })
+    const result = await response.json()
+    if (result.success) {
+      successMessage.value = '学生移除成功'
+      await fetchDoubleSelectionStudents()
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
+    } else {
+      errorMessage.value = result.message
+      setTimeout(() => {
+        errorMessage.value = ''
+      }, 3000)
+    }
+  } catch (error) {
+    console.error('移除学生失败', error)
+    errorMessage.value = '网络错误，请稍后重试'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 检查教师名额与学生人数的关系
+const checkQuotaAndStudents = () => {
+  // 计算教师的最大名额总和
+  const totalMaxQuota = doubleSelectionTeachers.value.reduce((sum: number, teacher: any) => {
+    return sum + (teacher.max_quota || 0)
+  }, 0)
+
+  // 计算参与双选的学生人数
+  const studentCount = doubleSelectionStudents.value.length
+
+  // 如果教师名额总和小于学生人数，进行提醒
+  if (totalMaxQuota < studentCount) {
+    errorMessage.value = `警告：教师总名额(${totalMaxQuota})小于学生人数(${studentCount})，可能导致部分学生无法分配导师`
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 5000)
   }
 }
 
@@ -1294,9 +1707,10 @@ onMounted(async () => {
   if (activeTab.value === 'announcement') {
     await fetchAnnouncements()
   }
-  // 如果当前标签是双选管理，获取导师列表
+  // 如果当前标签是双选管理，获取导师列表和学生列表
   if (activeTab.value === 'double-selection') {
     await fetchDoubleSelectionTeachers()
+    await fetchDoubleSelectionStudents()
   }
 })
 </script>
@@ -1446,51 +1860,145 @@ onMounted(async () => {
                 <button class="add-teacher-btn" @click="showAddTeacherDialog = true">
                   添加导师
                 </button>
+                <div class="search-box">
+                  <input
+                    type="text"
+                    placeholder="搜索已添加的导师"
+                    v-model="searchDoubleSelectionTeacher"
+                  />
+                  <button @click="searchDoubleSelectionTeachers">搜索</button>
+                </div>
               </div>
 
               <div class="teacher-table-container">
-                <table class="teacher-table">
-                  <thead>
-                    <tr>
-                      <th>姓名</th>
-                      <th>工号</th>
-                      <th>专业</th>
-                      <th>最小名额</th>
-                      <th>最大名额</th>
-                      <th>当前名额</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="teacher in doubleSelectionTeachers" :key="teacher.id">
-                      <td>{{ teacher.realname }}</td>
-                      <td>{{ teacher.username }}</td>
-                      <td>{{ teacher.major }}</td>
-                      <td>
-                        <input
-                          type="number"
-                          v-model.number="teacher.min_quota"
-                          @change="updateTeacherQuota(teacher.id, teacher.min_quota, teacher.max_quota)"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          v-model.number="teacher.max_quota"
-                          @change="updateTeacherQuota(teacher.id, teacher.min_quota, teacher.max_quota)"
-                        />
-                      </td>
-                      <td>{{ teacher.current_quota }}</td>
-                      <td>
-                        <button class="remove-btn" @click="removeTeacherFromDoubleSelection(teacher.id)">
-                          移除
-                        </button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div v-if="doubleSelectionTeachers.length === 0" class="no-data">
+                <div class="table-wrapper">
+                  <table class="teacher-table">
+                    <thead>
+                      <tr>
+                        <th>姓名</th>
+                        <th>工号</th>
+                        <th>专业</th>
+                        <th>最小名额</th>
+                        <th>最大名额</th>
+                        <th>当前名额</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="teacher in paginatedTeachers" :key="teacher.id">
+                        <td>{{ teacher.realname }}</td>
+                        <td>{{ teacher.username }}</td>
+                        <td>{{ teacher.major }}</td>
+                        <td>
+                          <input
+                            type="number"
+                            v-model.number="teacher.min_quota"
+                            @change="updateTeacherQuota(teacher.id, teacher.min_quota, teacher.max_quota)"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            v-model.number="teacher.max_quota"
+                          />
+                        </td>
+                        <td>{{ teacher.current_quota }}</td>
+                        <td>
+                          <button class="update-btn" @click="updateTeacherQuota(teacher.id, teacher.min_quota, teacher.max_quota)">
+                            更新名额
+                          </button>
+                          <button class="remove-btn" @click="removeTeacherFromDoubleSelection(teacher.id)">
+                            移除
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-if="paginatedTeachers.length === 0" class="no-data">
                   暂无参与双选的导师
+                </div>
+                <!-- 分页 -->
+                <div class="pagination" v-if="filteredDoubleSelectionTeachers.length > 0">
+                  <button
+                    @click="handleTeacherPageChange(teacherCurrentPage - 1)"
+                    :disabled="teacherCurrentPage === 1"
+                  >
+                    上一页
+                  </button>
+                  <span>{{ teacherCurrentPage }} / {{ Math.ceil(filteredDoubleSelectionTeachers.length / teacherPageSize) }}</span>
+                  <button
+                    @click="handleTeacherPageChange(teacherCurrentPage + 1)"
+                    :disabled="teacherCurrentPage >= Math.ceil(filteredDoubleSelectionTeachers.length / teacherPageSize)"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 学生管理 -->
+          <div class="admin-section">
+            <h2>学生管理</h2>
+            <div class="student-management">
+              <div class="student-actions">
+                <button class="add-student-btn" @click="showAddStudentDialog = true">
+                  添加学生
+                </button>
+                <div class="search-box">
+                  <input
+                    type="text"
+                    placeholder="搜索已添加的学生"
+                    v-model="searchDoubleSelectionStudent"
+                  />
+                  <button @click="searchDoubleSelectionStudents">搜索</button>
+                </div>
+              </div>
+
+              <div class="student-table-container">
+                <div class="table-wrapper">
+                  <table class="student-table">
+                    <thead>
+                      <tr>
+                        <th>姓名</th>
+                        <th>学号</th>
+                        <th>专业</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="student in paginatedStudents" :key="student.id">
+                        <td>{{ student.realname }}</td>
+                        <td>{{ student.username }}</td>
+                        <td>{{ student.major }}</td>
+                        <td>
+                          <button class="remove-btn" @click="removeStudentFromDoubleSelection(student.id)">
+                            移除
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-if="paginatedStudents.length === 0" class="no-data">
+                  暂无参与双选的学生
+                </div>
+                <!-- 分页 -->
+                <div class="pagination" v-if="filteredDoubleSelectionStudents.length > 0">
+                  <button
+                    @click="handleStudentPageChange(studentCurrentPage - 1)"
+                    :disabled="studentCurrentPage === 1"
+                  >
+                    上一页
+                  </button>
+                  <span>{{ studentCurrentPage }} / {{ Math.ceil(filteredDoubleSelectionStudents.length / studentPageSize) }}</span>
+                  <button
+                    @click="handleStudentPageChange(studentCurrentPage + 1)"
+                    :disabled="studentCurrentPage >= Math.ceil(filteredDoubleSelectionStudents.length / studentPageSize)"
+                  >
+                    下一页
+                  </button>
                 </div>
               </div>
             </div>
@@ -1553,6 +2061,78 @@ onMounted(async () => {
               <button @click="showAddTeacherDialog = false">取消</button>
               <button @click="addTeacherToDoubleSelection" :disabled="!selectedTeacher || loading">
                 {{ loading ? '添加中...' : '添加' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 添加学生对话框 -->
+        <div v-if="showAddStudentDialog" class="dialog-overlay">
+          <div class="dialog">
+            <h3>添加学生</h3>
+            <div class="dialog-content">
+              <!-- 模式切换 -->
+              <div class="mode-toggle">
+                <label>
+                  <input type="checkbox" v-model="isBatchMode">
+                  批量添加模式
+                </label>
+                <div class="mode-hint" v-if="isBatchMode">
+                  提示：可以使用通配符搜索，如 "2023*" 表示所有2023开头的学号
+                </div>
+              </div>
+
+              <div class="search-section">
+                <input
+                  v-model="searchStudentKeyword"
+                  placeholder="搜索学生姓名或学号（支持通配符*）"
+                  @keyup.enter="searchStudentsList"
+                />
+                <button @click="searchStudentsList">搜索</button>
+              </div>
+
+              <div v-if="searchStudents.length > 0" class="search-results">
+                <!-- 全选按钮 -->
+                <div v-if="isBatchMode" class="select-all-section">
+                  <label>
+                    <input
+                      type="checkbox"
+                      :checked="selectedStudents.length === searchStudents.length && searchStudents.length > 0"
+                      @change="toggleSelectAll"
+                    >
+                    全选 ({{ selectedStudents.length }}/{{ searchStudents.length }})
+                  </label>
+                </div>
+
+                <div
+                  v-for="student in searchStudents"
+                  :key="student.id"
+                  class="teacher-item"
+                  :class="{ 'selected': isBatchMode && selectedStudents.some(s => s.id === student.id) || !isBatchMode && selectedStudent && selectedStudent.id === student.id }"
+                  @click="selectStudent(student)"
+                >
+                  {{ student.realname }} ({{ student.username }}) - {{ student.major }}
+                  <span v-if="isBatchMode && selectedStudents.some(s => s.id === student.id) || !isBatchMode && selectedStudent && selectedStudent.id === student.id" class="checkmark">✓</span>
+                </div>
+              </div>
+
+              <div v-if="!isBatchMode && selectedStudent" class="selected-teacher">
+                <h4>已选择：{{ selectedStudent.realname }} ({{ selectedStudent.username }})</h4>
+              </div>
+
+              <div v-if="isBatchMode && selectedStudents.length > 0" class="selected-teacher">
+                <h4>已选择 {{ selectedStudents.length }} 名学生</h4>
+                <div class="selected-list">
+                  <div v-for="student in selectedStudents" :key="student.id" class="selected-item">
+                    {{ student.realname }} ({{ student.username }})
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="dialog-actions">
+              <button @click="showAddStudentDialog = false">取消</button>
+              <button @click="addStudentToDoubleSelection" :disabled="loading">
+                {{ loading ? '添加中...' : (isBatchMode ? `批量添加(${selectedStudents.length})` : '添加') }}
               </button>
             </div>
           </div>
@@ -3839,25 +4419,35 @@ reset-list {
 }
 
 /* 导师管理相关样式 */
-.teacher-management {
+.teacher-management,
+.student-management {
   margin-top: 20px;
+  background: #f8f9ff;
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid #e0e0e0;
 }
 
-.teacher-actions {
+.teacher-actions,
+.student-actions {
   margin-bottom: 20px;
 }
 
-.add-teacher-btn {
+.add-teacher-btn,
+.add-student-btn {
   background-color: #4CAF50;
   color: white;
   padding: 10px 20px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.3s ease;
 }
 
-.add-teacher-btn:hover {
+.add-teacher-btn:hover,
+.add-student-btn:hover {
   background-color: #45a049;
 }
 
@@ -3893,6 +4483,20 @@ reset-list {
   border-radius: 4px;
 }
 
+.update-btn {
+  background-color: #2196f3;
+  color: white;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 5px;
+}
+
+.update-btn:hover {
+  background-color: #1976d2;
+}
+
 .remove-btn {
   background-color: #f44336;
   color: white;
@@ -3908,7 +4512,193 @@ reset-list {
 
 .no-data {
   text-align: center;
+  padding: 40px 0;
+  color: #666;
+}
+
+.mode-toggle {
+  margin-bottom: 15px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+
+.mode-hint {
+  margin-top: 5px;
+  font-size: 12px;
+  color: #666;
+  font-style: italic;
+}
+
+.teacher-item.selected {
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196F3;
+}
+
+.checkmark {
+  float: right;
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+.selected-list {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-top: 10px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.selected-item {
+  padding: 5px;
+  border-bottom: 1px solid #eee;
+}
+
+.selected-item:last-child {
+  border-bottom: none;
+}
+
+.select-all-section {
+  padding: 10px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  font-weight: bold;
+}
+
+.search-box {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.search-box input {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 200px;
+}
+
+.search-box button {
+  padding: 8px 16px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.search-box button:hover {
+  background-color: #0b7dda;
+}
+
+.teacher-actions,
+.student-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.student-table-container {
+  overflow-x: auto;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
   padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.student-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.student-table th,
+.student-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+.student-table th {
+  background-color: #f2f2f2;
+  font-weight: bold;
+}
+
+.table-wrapper {
+  height: 100%;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.teacher-table-container,
+.student-table-container {
+  overflow-x: auto;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.teacher-table,
+.student-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.teacher-table th,
+.teacher-table td,
+.student-table th,
+.student-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+  white-space: nowrap;
+}
+
+.teacher-table th,
+.student-table th {
+  background-color: #f2f2f2;
+  font-weight: bold;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 15px;
+  gap: 10px;
+}
+
+.pagination button {
+  padding: 5px 10px;
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+}
+
+.pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination span {
+  font-size: 14px;
   color: #666;
 }
 
@@ -3976,6 +4766,22 @@ reset-list {
 
 .teacher-item:hover {
   background-color: #f5f5f5;
+}
+
+.teacher-item.selected {
+  background-color: #e6f7ff;
+}
+
+.checkmark {
+  float: right;
+  color: #1890ff;
+  font-weight: bold;
+}
+
+.select-all-section {
+  padding: 10px;
+  border-bottom: 1px solid #ddd;
+  background-color: #f9f9f9;
 }
 
 .selected-teacher {
