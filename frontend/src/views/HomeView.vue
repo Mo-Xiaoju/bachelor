@@ -1332,15 +1332,7 @@ onUnmounted(() => {
 
 
 
-.log-file a {
-  color: #2196f3;
-  text-decoration: none;
-  font-size: 14px;
-}
 
-.log-file a:hover {
-  text-decoration: underline;
-}
 
 /* 日历模块 */
 .calendar-section {
