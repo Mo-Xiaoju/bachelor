@@ -131,6 +131,10 @@ const loadingTrainProjects = ref(false)
 const internships = ref<any[]>([])
 const loadingInternships = ref(false)
 
+// 我的团队
+const myTeams = ref<any[]>([])
+const loadingTeams = ref(false)
+
 // 公告列表
 const announcements = ref<any[]>([])
 const loadingAnnouncements = ref(false)
@@ -337,6 +341,29 @@ const getInternships = async () => {
   }
 }
 
+// 获取教师团队信息
+const getMyTeams = async () => {
+  if (user.value?.role !== 'teacher') return
+  loadingTeams.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/team/my-teams'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      myTeams.value = result.teams
+    }
+  } catch (error) {
+    console.error('获取团队信息失败', error)
+  } finally {
+    loadingTeams.value = false
+  }
+}
+
 // 获取公告列表
 const getAnnouncements = async () => {
   loadingAnnouncements.value = true
@@ -371,6 +398,10 @@ onMounted(async () => {
   if (user.value?.role === 'student') {
     getTrainProjects()
     getInternships()
+  }
+  // 获取团队信息（仅对教师）
+  if (user.value?.role === 'teacher') {
+    getMyTeams()
   }
 
   // 获取公告列表
@@ -474,8 +505,8 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 我的实习 -->
-        <div class="internships">
+        <!-- 我的实习（学生）/ 我的团队（教师） -->
+        <div v-if="user?.role === 'student'" class="internships">
           <h3>我的实习</h3>
           <div class="table-container">
             <table class="project-table">
@@ -510,6 +541,53 @@ onUnmounted(() => {
                             : '待确认'
                       }}
                     </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 我的团队（教师） -->
+        <div v-else-if="user?.role === 'teacher'" class="internships">
+          <h3>我的团队</h3>
+          <div class="table-container">
+            <table class="project-table">
+              <thead>
+                <tr>
+                  <th>团队主题</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="loadingTeams">
+                  <td colspan="3" class="loading-cell">
+                    <p>加载中...</p>
+                  </td>
+                </tr>
+                <tr v-else-if="!myTeams || myTeams.length === 0">
+                  <td colspan="3" class="empty-cell">
+                    <p>暂无团队信息</p>
+                  </td>
+                </tr>
+                <tr v-for="team in myTeams || []" :key="team.id">
+                  <td>{{ team.theme }}</td>
+                  <td>
+                    <span class="status-badge" :class="team.status">
+                      {{
+                        team.status === 'pending'
+                          ? '待审批'
+                          : team.status === 'approved'
+                            ? '已批准'
+                            : team.status === 'rejected'
+                              ? '已拒绝'
+                              : team.status
+                      }}
+                    </span>
+                  </td>
+                  <td>
+                    <RouterLink to="/team" class="function-link">查看详情</RouterLink>
                   </td>
                 </tr>
               </tbody>
