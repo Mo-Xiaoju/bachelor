@@ -12,7 +12,7 @@ const errorMessage = ref('')
 const user = ref<any>(null)
 const selectedStartTime = ref('')
 const selectedEndTime = ref('')
-const activeTab = ref('double-selection') // 双选管理/校内用户注册/科研训练管理
+const activeTab = ref('double-selection') // 双选管理/校内用户注册/科研训练管理/团队管理
 const pendingProjects = ref<any[]>([])
 const loadingProjects = ref(false)
 const showProjectDetail = ref(false)
@@ -21,6 +21,10 @@ const selectedProject = ref<any>(null)
 const pendingCompanies = ref<any[]>([])
 const loadingCompanies = ref(false)
 const reviewComment = ref('')
+// 团队审批相关
+const pendingTeams = ref<any[]>([])
+const loadingTeams = ref(false)
+const teamReviewComment = ref('')
 const getToken = (): string | null => {
   const token = sessionStorage.getItem('token')
   console.log('Navbar - 获取 Token:', token ? '存在' : '不存在')
@@ -356,6 +360,9 @@ const switchTab = (tab: string) => {
   if (tab === 'double-selection') {
     fetchDoubleSelectionTeachers()
     fetchDoubleSelectionStudents()
+  }
+  if (tab === 'team-management') {
+    fetchPendingTeams()
   }
 }
 
@@ -1074,6 +1081,87 @@ const rejectProject = async (projectId: number) => {
   }
 }
 
+// 获取待审批团队
+const fetchPendingTeams = async () => {
+  loadingTeams.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/team/pending'), {
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      pendingTeams.value = result.teams
+    } else {
+      errorMessage.value = result.message
+      setTimeout(() => {
+        errorMessage.value = ''
+      }, 3000)
+    }
+  } catch (error) {
+    console.error('获取待审批团队失败', error)
+    errorMessage.value = '网络错误，请稍后重试'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+  } finally {
+    loadingTeams.value = false
+  }
+}
+
+// 审批团队
+const reviewTeam = async (teamId: number, action: string) => {
+  if (action === 'reject' && !teamReviewComment.value.trim()) {
+    errorMessage.value = '拒绝时请填写审核意见'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+    return
+  }
+
+  loading.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/team/${action}`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : '',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        team_id: teamId,
+        comment: teamReviewComment.value
+      })
+    })
+    const result = await response.json()
+    if (result.success) {
+      successMessage.value = result.message
+      teamReviewComment.value = ''
+      fetchPendingTeams()
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 3000)
+    } else {
+      errorMessage.value = result.message
+      setTimeout(() => {
+        errorMessage.value = ''
+      }, 3000)
+    }
+  } catch (error) {
+    console.error('审批团队失败', error)
+    errorMessage.value = '网络错误，请稍后重试'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+  } finally {
+    loading.value = false
+  }
+}
+
 // 查看课题详情
 const viewProject = async (projectId: number) => {
   try {
@@ -1773,6 +1861,14 @@ onMounted(async () => {
             <span class="menu-icon">🏢</span>
             <span class="menu-text">企业审批</span>
           </div>
+          <div
+            class="menu-item"
+            :class="{ active: activeTab === 'team-management' }"
+            @click="switchTab('team-management')"
+          >
+            <span class="menu-icon">👥</span>
+            <span class="menu-text">团队管理</span>
+          </div>
         </div>
       </div>
 
@@ -2399,6 +2495,85 @@ onMounted(async () => {
                       class="approve-btn"
                       @click="reviewCompany(company.id, 'approve')"
                       :disabled="loading"
+                    >
+                      批准
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 团队管理 -->
+        <div v-if="activeTab === 'team-management'" class="tab-content">
+          <div class="admin-section">
+            <h2>团队管理</h2>
+            <div v-if="loadingTeams" class="loading">加载中...</div>
+            <div v-else-if="pendingTeams.length === 0" class="empty-state">
+              暂无待审批的团队
+            </div>
+            <div v-else class="team-list">
+              <div v-for="team in pendingTeams" :key="team.id" class="team-card">
+                <div class="team-header">
+                  <h3>{{ team.theme }}</h3>
+                  <span class="team-time">申请时间: {{ team.create_time }}</span>
+                </div>
+                <div class="team-info">
+                  <div class="info-row">
+                    <span class="info-label">发起人：</span>
+                    <span class="info-value">{{ team.initiator?.realname || '未知' }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">成员：</span>
+                    <span class="info-value">{{ team.members?.map((m: any) => m.realname).join(', ') || '无' }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">课程：</span>
+                    <div class="course-list">
+                      <div v-for="(course, index) in team.courses || []" :key="index" class="course-item">
+                        {{ course.courseName }} - 授课教师：{{ course.teacherNames?.join(', ') || '无' }}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">描述：</span>
+                    <span class="info-value">{{ team.description }}</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">成员意见：</span>
+                    <span v-if="team.members?.some((m: any) => m.status === 'rejected')" class="member-opinion negative">
+                      成员意见不统一，自动拒绝
+                    </span>
+                    <span v-else-if="team.members?.every((m: any) => m.status === 'accepted')" class="member-opinion positive">
+                      所有成员已同意
+                    </span>
+                    <span v-else class="member-opinion pending">
+                      部分成员未处理
+                    </span>
+                  </div>
+                </div>
+                <div class="review-section">
+                  <div class="form-group">
+                    <label>审核意见（选填，拒绝时必填）：</label>
+                    <textarea
+                      v-model="teamReviewComment"
+                      placeholder="请输入审核意见"
+                      rows="3"
+                    ></textarea>
+                  </div>
+                  <div class="review-buttons">
+                    <button
+                      class="reject-btn"
+                      @click="reviewTeam(team.id, 'reject')"
+                      :disabled="loading"
+                    >
+                      拒绝
+                    </button>
+                    <button
+                      class="approve-btn"
+                      @click="reviewTeam(team.id, 'approve')"
+                      :disabled="loading || team.members?.some((m: any) => m.status === 'rejected')"
                     >
                       批准
                     </button>
