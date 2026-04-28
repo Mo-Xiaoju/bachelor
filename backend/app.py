@@ -322,11 +322,13 @@ class Team(db.Model):
     theme = db.Column(db.String(255), nullable=False)  # 团队主题
     course = db.Column(db.String(255), nullable=False)  # 课程名称
     description = db.Column(db.Text, nullable=True)  # 团队描述
-    status = db.Column(db.String(20), nullable=False, default='pending')  # 状态：pending/approved/rejected
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 状态：pending/approved/rejected/dissolving/dissolved
     initiator_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 发起者ID
     create_time = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间
     review_time = db.Column(db.DateTime, nullable=True)  # 审核时间
     review_comment = db.Column(db.Text, nullable=True)  # 审核意见
+    dissolve_reason = db.Column(db.Text, nullable=True)  # 解散原因
+    dissolve_time = db.Column(db.DateTime, nullable=True)  # 解散申请时间
     
     # 关联
     initiator = db.relationship('User', backref=db.backref('initiated_teams', lazy=True))
@@ -346,6 +348,23 @@ class TeamMember(db.Model):
     
     # 唯一约束：每个用户在每个团队中只能有一条记录
     __table_args__ = (db.UniqueConstraint('team_id', 'user_id', name='_team_user_uc'),)
+
+# 申请日志模型
+class ApplicationLog(db.Model):
+    __tablename__ = 'application_log'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 用户ID
+    type = db.Column(db.String(50), nullable=False)  # 申请类型：internship/train/double-selection/team/company/project
+    status = db.Column(db.String(20), nullable=False)  # 申请状态：pending/approved/rejected/completed
+    handler_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # 处理人ID
+    handler_name = db.Column(db.String(255), nullable=True)  # 处理人姓名
+    receipt = db.Column(db.Text, nullable=True)  # 回执信息
+    description = db.Column(db.Text, nullable=True)  # 详细描述
+    create_time = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间
+    
+    # 关联
+    user = db.relationship('User', foreign_keys=[user_id], backref='application_logs')
+    handler = db.relationship('User', foreign_keys=[handler_id])
 
 
 
@@ -1326,18 +1345,18 @@ def get_my_teams():
                     member_map[user.id] = user.realname
             
             # 解析课程信息
-        courses = []
-        if team.course:
-            for course_str in team.course.split(';'):
-                if ':' in course_str:
-                    course_name, teacher_ids_str = course_str.split(':', 1)
-                    teacher_ids = list(map(int, teacher_ids_str.split(',')))
-                    teacher_names = [member_map.get(teacher_id, '') for teacher_id in teacher_ids]
-                    courses.append({
-                        'courseName': course_name,
-                        'teacherIds': teacher_ids,
-                        'teacherNames': teacher_names
-                    })
+            courses = []
+            if team.course:
+                for course_str in team.course.split(';'):
+                    if ':' in course_str:
+                        course_name, teacher_ids_str = course_str.split(':', 1)
+                        teacher_ids = list(map(int, teacher_ids_str.split(',')))
+                        teacher_names = [member_map.get(teacher_id, '') for teacher_id in teacher_ids]
+                        courses.append({
+                            'courseName': course_name,
+                            'teacherIds': teacher_ids,
+                            'teacherNames': teacher_names
+                        })
             
             team_list.append({
                 'id': team.id,
@@ -1346,13 +1365,63 @@ def get_my_teams():
                 'description': team.description,
                 'status': team.status,
                 'members': member_info,
-                'create_time': team.create_time.strftime('%Y-%m-%d %H:%M:%S')
+                'create_time': team.create_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'is_initiator': team.initiator_id == user_id
             })
         
         return jsonify({'success': True, 'teams': team_list})
     except Exception as e:
         print(f"获取我的团队失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
+
+# 申请解散团队API
+@app.route('/api/team/apply-dissolve', methods=['POST'])
+@login_required
+def apply_dissolve_team():
+    """申请解散团队"""
+    try:
+        data = request.get_json()
+        team_id = data.get('team_id')
+        user_id = request.current_user['user_id']
+        
+        if not team_id:
+            return jsonify({'success': False, 'message': '缺少团队ID'}), 400
+        
+        # 查找团队
+        team = Team.query.get(team_id)
+        if not team:
+            return jsonify({'success': False, 'message': '团队不存在'}), 404
+        
+        # 检查是否为发起者
+        if team.initiator_id != user_id:
+            return jsonify({'success': False, 'message': '只有团队发起者才能申请解散'}), 403
+        
+        # 检查团队状态
+        if team.status != 'approved':
+            return jsonify({'success': False, 'message': '只能解散已批准的团队'}), 400
+        
+        # 更新团队状态为解散申请中
+        team.status = 'dissolving'
+        team.dissolve_time = datetime.utcnow()
+        
+        db.session.commit()
+        
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='team',
+            status='pending',
+            receipt='申请解散团队',
+            description=f'申请解散团队：{team.theme}'
+        )
+        db.session.add(log)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '申请已提交，等待管理员审批'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"申请解散团队失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'申请失败: {str(e)}'})
 
 # 获取对我的组队申请
 @app.route('/api/team/my-applications', methods=['GET'])
@@ -1362,9 +1431,11 @@ def get_my_team_applications():
     try:
         user_id = request.current_user['user_id']
         
-        # 获取用户收到的所有组队申请（包括已处理的）
-        team_memberships = TeamMember.query.filter_by(
-            user_id=user_id
+        # 获取用户收到的组队申请（只显示team状态为pending的团队，但保留所有用户选择状态以允许修改）
+        team_memberships = TeamMember.query.filter(
+            TeamMember.user_id == user_id
+        ).join(Team, TeamMember.team_id == Team.id).filter(
+            Team.status == 'pending'
         ).all()
         
         # 构建响应数据
@@ -1388,18 +1459,18 @@ def get_my_team_applications():
                         member_map[user.id] = user.realname
                 
                 # 解析课程信息
-        courses = []
-        if team.course:
-            for course_str in team.course.split(';'):
-                if ':' in course_str:
-                    course_name, teacher_ids_str = course_str.split(':', 1)
-                    teacher_ids = list(map(int, teacher_ids_str.split(',')))
-                    teacher_names = [member_map.get(teacher_id, '') for teacher_id in teacher_ids]
-                    courses.append({
-                        'courseName': course_name,
-                        'teacherIds': teacher_ids,
-                        'teacherNames': teacher_names
-                    })
+                courses = []
+                if team.course:
+                    for course_str in team.course.split(';'):
+                        if ':' in course_str:
+                            course_name, teacher_ids_str = course_str.split(':', 1)
+                            teacher_ids = list(map(int, teacher_ids_str.split(',')))
+                            teacher_names = [member_map.get(teacher_id, '') for teacher_id in teacher_ids]
+                            courses.append({
+                                'courseName': course_name,
+                                'teacherIds': teacher_ids,
+                                'teacherNames': teacher_names
+                            })
                 
                 # 获取当前用户在该团队中的状态
                 my_status = tm.status
@@ -1484,8 +1555,8 @@ def get_pending_teams():
         if user.role != 'admin':
             return jsonify({'success': False, 'message': '权限不足'}), 403
         
-        # 获取待审批的团队
-        teams = Team.query.filter_by(status='pending').all()
+        # 获取待审批的团队（包括解散申请）
+        teams = Team.query.filter(Team.status.in_(['pending', 'dissolving'])).all()
         
         # 构建响应数据
         team_list = []
@@ -1556,14 +1627,24 @@ def approve_team():
         if not team:
             return jsonify({'success': False, 'message': '团队不存在'}), 404
         
-        # 更新状态
-        team.status = 'approved'
+        # 根据当前状态决定批准类型
+        if team.status == 'pending':
+            # 批准组建团队
+            team.status = 'approved'
+            message = '团队已批准'
+        elif team.status == 'dissolving':
+            # 批准解散团队
+            team.status = 'dissolved'
+            message = '团队已解散'
+        else:
+            return jsonify({'success': False, 'message': '无效的团队状态'}), 400
+        
         team.review_time = datetime.utcnow()
         team.review_comment = comment
         
         db.session.commit()
         
-        return jsonify({'success': True, 'message': '团队已批准'})
+        return jsonify({'success': True, 'message': message})
     except Exception as e:
         db.session.rollback()
         print(f"批准团队失败: {str(e)}")
@@ -1573,7 +1654,7 @@ def approve_team():
 @app.route('/api/team/reject', methods=['POST'])
 @login_required
 def reject_team():
-    """拒绝团队"""
+    """拒绝团队或驳回解散申请"""
     try:
         user_id = request.current_user['user_id']
         user = User.query.get(user_id)
@@ -1592,6 +1673,20 @@ def reject_team():
         team = Team.query.get(team_id)
         if not team:
             return jsonify({'success': False, 'message': '团队不存在'}), 404
+        
+        # 根据当前状态决定拒绝类型
+        if team.status == 'pending':
+            # 拒绝组建团队
+            team.status = 'rejected'
+            message = '团队已拒绝'
+        elif team.status == 'dissolving':
+            # 驳回解散申请
+            team.status = 'approved'
+            team.dissolve_reason = None
+            team.dissolve_time = None
+            message = '解散申请已驳回'
+        else:
+            return jsonify({'success': False, 'message': '无效的团队状态'}), 400
         
         # 更新状态
         team.status = 'rejected'
@@ -2210,8 +2305,66 @@ def update_user_profile():
         db.session.rollback()
         return jsonify({'success': False, 'message': f'更新失败: {str(e)}'}), 500
 
-
-
+# 获取用户申请日志API
+@app.route('/api/user/application-logs', methods=['GET'])
+@login_required
+def get_user_application_logs():
+    """获取用户的申请日志（支持分页和筛选）"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        # 获取分页参数
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        
+        # 获取筛选参数
+        keyword = request.args.get('keyword', '')
+        types = request.args.get('types', '').split(',') if request.args.get('types') else []
+        statuses = request.args.get('statuses', '').split(',') if request.args.get('statuses') else []
+        
+        # 构建查询
+        query = ApplicationLog.query.filter_by(user_id=user_id)
+        
+        # 类型筛选
+        if types and types != ['']:
+            query = query.filter(ApplicationLog.type.in_(types))
+        
+        # 状态筛选
+        if statuses and statuses != ['']:
+            query = query.filter(ApplicationLog.status.in_(statuses))
+        
+        # 关键词搜索（搜索描述和回执信息）
+        if keyword:
+            query = query.filter(
+                (ApplicationLog.description.like(f'%{keyword}%')) |
+                (ApplicationLog.receipt.like(f'%{keyword}%'))
+            )
+        
+        # 排序
+        query = query.order_by(ApplicationLog.create_time.desc())
+        
+        # 分页
+        total_count = query.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        logs = query.offset((page - 1) * page_size).limit(page_size).all()
+        
+        # 构建响应数据
+        log_list = []
+        for log in logs:
+            log_list.append({
+                'id': log.id,
+                'type': log.type,
+                'status': log.status,
+                'handler_name': log.handler_name,
+                'receipt': log.receipt,
+                'description': log.description,
+                'create_time': log.create_time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({'success': True, 'logs': log_list, 'total_pages': total_pages, 'total_count': total_count})
+    except Exception as e:
+        print(f"获取申请日志失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
 
 # 修改密码API
 @app.route('/api/change-password', methods=['POST'])
