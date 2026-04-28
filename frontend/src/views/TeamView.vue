@@ -280,6 +280,40 @@ const getMyTeams = async () => {
   }
 }
 
+const applyDissolveTeam = async (teamId: number) => {
+  if (!confirm('确定要申请解散该团队吗？此操作需要管理员批准。')) {
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/team/apply-dissolve'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ team_id: teamId }),
+      credentials: 'include',
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      if (result.success) {
+        alert('申请已提交，等待管理员审批')
+        getMyTeams()
+      } else {
+        alert(result.message || '申请失败')
+      }
+    } else {
+      alert('申请失败，请稍后重试')
+    }
+  } catch (error) {
+    console.error('申请解散团队失败', error)
+    alert('申请失败，请稍后重试')
+  }
+}
+
 // 获取团队请求
 const getTeamRequests = async () => {
   loadingTeams.value = true
@@ -412,6 +446,7 @@ onMounted(() => {
                 <p><strong>成员：</strong>{{ team.members.map((m: any) => m.realname).join(', ') }}</p>
                 <p><strong>状态：</strong>{{ team.status }}</p>
                 <button v-if="team.status === 'pending'" class="submit-btn">提交管理员确认</button>
+                <button v-if="team.status === 'approved' && team.is_initiator" class="dissolve-btn" @click="applyDissolveTeam(team.id)">申请解散团队</button>
               </div>
             </div>
           </div>

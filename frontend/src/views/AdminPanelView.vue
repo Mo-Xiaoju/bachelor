@@ -2518,6 +2518,7 @@ onMounted(async () => {
                 <div class="team-header">
                   <h3>{{ team.theme }}</h3>
                   <span class="team-time">申请时间: {{ team.create_time }}</span>
+                  <span v-if="team.status === 'dissolving'" class="dissolve-badge">解散申请</span>
                 </div>
                 <div class="team-info">
                   <div class="info-row">
@@ -2540,7 +2541,7 @@ onMounted(async () => {
                     <span class="info-label">描述：</span>
                     <span class="info-value">{{ team.description }}</span>
                   </div>
-                  <div class="info-row">
+                  <div v-if="team.status !== 'dissolving'" class="info-row">
                     <span class="info-label">成员意见：</span>
                     <span v-if="team.members?.some((m: any) => m.status === 'rejected')" class="member-opinion negative">
                       成员意见不统一，自动拒绝
@@ -2551,6 +2552,10 @@ onMounted(async () => {
                     <span v-else class="member-opinion pending">
                       部分成员未处理
                     </span>
+                  </div>
+                  <div v-else class="info-row">
+                    <span class="info-label">申请类型：</span>
+                    <span class="member-opinion negative">团队解散申请</span>
                   </div>
                 </div>
                 <div class="review-section">
@@ -2565,17 +2570,17 @@ onMounted(async () => {
                   <div class="review-buttons">
                     <button
                       class="reject-btn"
-                      @click="reviewTeam(team.id, 'reject')"
+                      @click="reviewTeam(team.id, team.status === 'dissolving' ? 'reject_dissolve' : 'reject')"
                       :disabled="loading"
                     >
-                      拒绝
+                      {{ team.status === 'dissolving' ? '驳回解散申请' : '拒绝' }}
                     </button>
                     <button
                       class="approve-btn"
-                      @click="reviewTeam(team.id, 'approve')"
-                      :disabled="loading || team.members?.some((m: any) => m.status === 'rejected')"
+                      @click="reviewTeam(team.id, team.status === 'dissolving' ? 'approve_dissolve' : 'approve')"
+                      :disabled="loading || (team.status !== 'dissolving' && team.members?.some((m: any) => m.status === 'rejected'))"
                     >
-                      批准
+                      {{ team.status === 'dissolving' ? '批准解散' : '批准' }}
                     </button>
                   </div>
                 </div>

@@ -6,8 +6,39 @@ const user = ref<any>(null)
 const loading = ref(true)
 const activeMenu = ref('个人信息')
 const isEditing = ref(false)
+const loadingLogs = ref(false)
+const applicationLogs = ref<any[]>([])
 
-const menuItems = ref([{ name: '个人信息', path: 'profile' }])
+// 翻页相关
+const currentPage = ref(1)
+const pageSize = ref(1)
+const totalPages = ref(1)
+
+// 筛选相关
+const searchKeyword = ref('')
+const selectedTypes = ref<string[]>([])
+const selectedStatuses = ref<string[]>([])
+
+const typeOptions = [
+  { value: 'internship', label: '实习申请' },
+  { value: 'train', label: '科研训练申请' },
+  { value: 'double-selection', label: '双选申请' },
+  { value: 'team', label: '团队组建申请' },
+  { value: 'company', label: '企业注册申请' },
+  { value: 'project', label: '课题申请' }
+]
+
+const statusOptions = [
+  { value: 'pending', label: '待处理' },
+  { value: 'approved', label: '已批准' },
+  { value: 'rejected', label: '已拒绝' },
+  { value: 'completed', label: '已完成' }
+]
+
+const menuItems = ref([
+  { name: '个人信息', path: 'profile' },
+  { name: '我的信息', path: 'my-info' }
+])
 
 const editForm = ref({
   contact: '',
@@ -46,6 +77,114 @@ const checkAuth = async () => {
 const handleMenuClick = (item: any) => {
   activeMenu.value = item.name
   console.log('点击菜单:', item.name, '路径:', item.path)
+  if (item.name === '我的信息') {
+    getApplicationLogs()
+  }
+}
+
+const getApplicationLogs = async (page: number = 1) => {
+  loadingLogs.value = true
+  currentPage.value = page
+  try {
+    const token = sessionStorage.getItem('token')
+    const params = new URLSearchParams()
+    params.append('page', page.toString())
+    params.append('page_size', pageSize.value.toString())
+
+    if (searchKeyword.value) {
+      params.append('keyword', searchKeyword.value)
+    }
+
+    if (selectedTypes.value.length > 0) {
+      params.append('types', selectedTypes.value.join(','))
+    }
+
+    if (selectedStatuses.value.length > 0) {
+      params.append('statuses', selectedStatuses.value.join(','))
+    }
+
+    const response = await fetch(buildURL('/api/user/application-logs?' + params.toString()), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      if (result.success) {
+        applicationLogs.value = result.logs
+        totalPages.value = result.total_pages || 1
+      }
+    }
+  } catch (error) {
+    console.error('获取申请日志失败', error)
+  } finally {
+    loadingLogs.value = false
+  }
+}
+
+const toggleTypeFilter = (type: string) => {
+  const index = selectedTypes.value.indexOf(type)
+  if (index > -1) {
+    selectedTypes.value.splice(index, 1)
+  } else {
+    selectedTypes.value.push(type)
+  }
+  getApplicationLogs(1)
+}
+
+const toggleStatusFilter = (status: string) => {
+  const index = selectedStatuses.value.indexOf(status)
+  if (index > -1) {
+    selectedStatuses.value.splice(index, 1)
+  } else {
+    selectedStatuses.value.push(status)
+  }
+  getApplicationLogs(1)
+}
+
+const handleSearch = () => {
+  getApplicationLogs(1)
+}
+
+const clearFilters = () => {
+  searchKeyword.value = ''
+  selectedTypes.value = []
+  selectedStatuses.value = []
+  getApplicationLogs(1)
+}
+
+const getTypeLabel = (type: string) => {
+  const labels: Record<string, string> = {
+    'internship': '实习申请',
+    'train': '科研训练申请',
+    'double-selection': '双选申请',
+    'team': '团队组建申请',
+    'company': '企业注册申请',
+    'project': '课题申请'
+  }
+  return labels[type] || type
+}
+
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    'pending': '待处理',
+    'approved': '已批准',
+    'rejected': '已拒绝',
+    'completed': '已完成'
+  }
+  return labels[status] || status
+}
+
+const getStatusClass = (status: string) => {
+  const classes: Record<string, string> = {
+    'pending': 'status-pending',
+    'approved': 'status-approved',
+    'rejected': 'status-rejected',
+    'completed': 'status-completed'
+  }
+  return classes[status] || ''
 }
 
 const editContactInfo = () => {
@@ -81,7 +220,9 @@ const saveContactInfo = async () => {
   }
 }
 
-onMounted(checkAuth)
+onMounted(() => {
+  checkAuth()
+})
 </script>
 
 <style scoped>
@@ -385,6 +526,280 @@ onMounted(checkAuth)
   }
 }
 
+/* 我的信息样式 */
+.my-info-content {
+  animation: fadeIn 0.5s ease;
+}
+
+.info-card {
+  background: #f8f9ff;
+  padding: 30px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+.info-card h3 {
+  color: #2c3e50;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #667eea;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 15px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #888;
+}
+
+.logs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.log-item {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  border-left: 4px solid #667eea;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.log-type {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.log-type.internship {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.log-type.train {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.log-type.double-selection {
+  background: #e8f5e9;
+  color: #388e3c;
+}
+
+.log-type.team {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.log-type.company {
+  background: #fce4ec;
+  color: #c2185b;
+}
+
+.log-type.project {
+  background: #e0f2f1;
+  color: #00897b;
+}
+
+.log-time {
+  font-size: 12px;
+  color: #999;
+}
+
+.log-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.log-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.log-label {
+  font-weight: 600;
+  color: #555;
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.log-value {
+  color: #333;
+}
+
+.status-pending {
+  color: #ff9800;
+  font-weight: 500;
+}
+
+.status-approved {
+  color: #4caf50;
+  font-weight: 500;
+}
+
+.status-rejected {
+  color: #f44336;
+  font-weight: 500;
+}
+
+.status-completed {
+  color: #2196f3;
+  font-weight: 500;
+}
+
+/* 筛选区域样式 */
+.filter-section {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.search-box {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.search-box input {
+  flex: 1;
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.search-btn {
+  padding: 10px 20px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.3s;
+}
+
+.search-btn:hover {
+  background: #5a6fd6;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-weight: 600;
+  color: #555;
+  min-width: 80px;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: #666;
+  font-size: 14px;
+  padding: 5px 10px;
+  background: #f5f5f5;
+  border-radius: 6px;
+}
+
+.filter-checkbox input {
+  cursor: pointer;
+}
+
+.clear-btn {
+  padding: 8px 16px;
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s;
+}
+
+.clear-btn:hover {
+  background: #eee;
+  border-color: #ccc;
+}
+
+/* 翻页样式 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.page-btn {
+  padding: 8px 16px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.3s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #5a6fd6;
+}
+
+.page-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.page-info {
+  font-size: 14px;
+  color: #666;
+}
 
 </style>
 
@@ -457,6 +872,106 @@ onMounted(checkAuth)
             </div>
           </div>
 
+          <!-- 我的信息 -->
+          <div v-if="activeMenu === '我的信息'" class="my-info-content">
+            <div class="info-card">
+              <h3>申请日志</h3>
+
+              <!-- 搜索和筛选区域 -->
+              <div class="filter-section">
+                <div class="search-box">
+                  <input
+                    type="text"
+                    v-model="searchKeyword"
+                    placeholder="搜索申请记录..."
+                    @keyup.enter="handleSearch"
+                  />
+                  <button class="search-btn" @click="handleSearch">搜索</button>
+                </div>
+
+                <!-- 类型筛选 -->
+                <div class="filter-group">
+                  <span class="filter-label">申请类型：</span>
+                  <label v-for="option in typeOptions" :key="option.value" class="filter-checkbox">
+                    <input
+                      type="checkbox"
+                      :checked="selectedTypes.includes(option.value)"
+                      @change="toggleTypeFilter(option.value)"
+                    />
+                    {{ option.label }}
+                  </label>
+                </div>
+
+                <!-- 状态筛选 -->
+                <div class="filter-group">
+                  <span class="filter-label">申请状态：</span>
+                  <label v-for="option in statusOptions" :key="option.value" class="filter-checkbox">
+                    <input
+                      type="checkbox"
+                      :checked="selectedStatuses.includes(option.value)"
+                      @change="toggleStatusFilter(option.value)"
+                    />
+                    {{ option.label }}
+                  </label>
+                </div>
+
+                <button class="clear-btn" @click="clearFilters">清除筛选</button>
+              </div>
+
+              <div v-if="loadingLogs" class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>加载中...</p>
+              </div>
+              <div v-else-if="applicationLogs.length === 0" class="empty-state">
+                <p>暂无申请记录</p>
+              </div>
+              <div v-else class="logs-list">
+                <div v-for="log in applicationLogs" :key="log.id" class="log-item">
+                  <div class="log-header">
+                    <span class="log-type" :class="log.type.toLowerCase()">{{ getTypeLabel(log.type) }}</span>
+                    <span class="log-time">{{ log.create_time }}</span>
+                  </div>
+                  <div class="log-content">
+                    <div class="log-row">
+                      <span class="log-label">申请结果：</span>
+                      <span class="log-value" :class="getStatusClass(log.status)">{{ getStatusLabel(log.status) }}</span>
+                    </div>
+                    <div class="log-row">
+                      <span class="log-label">处理人：</span>
+                      <span class="log-value">{{ log.handler_name || '系统' }}</span>
+                    </div>
+                    <div class="log-row">
+                      <span class="log-label">回执信息：</span>
+                      <span class="log-value">{{ log.receipt || '-' }}</span>
+                    </div>
+                    <div v-if="log.description" class="log-row">
+                      <span class="log-label">详情：</span>
+                      <span class="log-value">{{ log.description }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 翻页区域 -->
+              <div v-if="totalPages > 1" class="pagination">
+                <button
+                  class="page-btn"
+                  :disabled="currentPage === 1"
+                  @click="getApplicationLogs(currentPage - 1)"
+                >
+                  上一页
+                </button>
+                <span class="page-info">第 {{ currentPage }} / {{ totalPages }} 页</span>
+                <button
+                  class="page-btn"
+                  :disabled="currentPage === totalPages"
+                  @click="getApplicationLogs(currentPage + 1)"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </div>
 
         </div>
       </div>
