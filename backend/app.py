@@ -1902,8 +1902,6 @@ def inner_register():
     contact = data.get('contact')
     title = data.get('title')
     email = data.get('email')
-    min_quota = None  # 暂时不设置最小名额
-    max_quota = None  # 暂时不设置最大名额
     
     if not username or not realname or not id_card:
         return jsonify({'success': False, 'message': '缺少必要字段（用户名、真实姓名和身份证号）'}), 400
@@ -1936,8 +1934,6 @@ def inner_register():
         role=role,
         realname=realname,
         id_card_last6=id_card_last6,
-        min_quota=min_quota,
-        max_quota=max_quota,
         major=major,
         department=department,
         contact=contact,
@@ -2116,8 +2112,6 @@ def batch_register():
                 contact = row_data.get('contact')
                 title = row_data.get('title')
                 email = row_data.get('email')
-                min_quota = None  # 暂时不设置最小名额
-                max_quota = None  # 暂时不设置最大名额
                 
                 if not username or not realname:
                     errors.append(f'Sheet "{sheet_name}" 第{sheet._current_row-1}行: 缺少用户名或真实姓名')
@@ -2156,8 +2150,6 @@ def batch_register():
                     role=role,
                     realname=realname,
                     id_card_last6=id_card_last6,
-                    min_quota=min_quota,
-                    max_quota=max_quota,
                     major=major,
                     department=department,
                     contact=contact,
@@ -4934,6 +4926,128 @@ def get_student_experiment_reports():
         print(f"获取学生实验报告列表失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取学生实验报告列表失败: {str(e)}'}), 500
 
+
+@app.route('/api/database/stats', methods=['GET'])
+@login_required
+def get_database_stats():
+    """获取数据库统计信息"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        # 获取统计数据
+        total_users = User.query.count()
+        students = User.query.filter_by(role='student').count()
+        teachers = User.query.filter_by(role='teacher').count()
+        companies = Company.query.count()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'totalUsers': total_users,
+                'students': students,
+                'teachers': teachers,
+                'companies': companies
+            }
+        })
+    except Exception as e:
+        print(f"获取数据库统计失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
+
+@app.route('/api/database/table/<table_name>', methods=['GET'])
+@login_required
+def get_table_data(table_name):
+    """获取指定数据表的数据"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        # 允许访问的表
+        allowed_tables = [
+            'user', 'company', 'internship', 'internship_application',
+            'team', 'team_member', 'teacher_selection',
+            'double_selection_teacher', 'double_selection_student',
+            'train_project', 'train_application', 'train_report',
+            'application_log'
+        ]
+        
+        if table_name not in allowed_tables:
+            return jsonify({'success': False, 'message': '不允许访问该表'}), 403
+        
+        # 获取分页参数
+        page = int(request.args.get('page', 1))
+        size = int(request.args.get('size', 20))
+        offset = (page - 1) * size
+        
+        # 根据表名获取数据
+        table_class = None
+        if table_name == 'user':
+            table_class = User
+        elif table_name == 'company':
+            table_class = Company
+        elif table_name == 'internship':
+            table_class = Internship
+        elif table_name == 'internship_application':
+            table_class = InternshipApplication
+        elif table_name == 'team':
+            table_class = Team
+        elif table_name == 'team_member':
+            table_class = TeamMember
+        elif table_name == 'teacher_selection':
+            table_class = TeacherSelection
+        elif table_name == 'double_selection_teacher':
+            table_class = DoubleSelectionTeacher
+        elif table_name == 'double_selection_student':
+            table_class = DoubleSelectionStudent
+        elif table_name == 'train_project':
+            table_class = TrainProject
+        elif table_name == 'train_application':
+            table_class = TrainApplication
+        elif table_name == 'train_report':
+            table_class = TrainReport
+        elif table_name == 'application_log':
+            table_class = ApplicationLog
+        
+        if not table_class:
+            return jsonify({'success': False, 'message': '表不存在'}), 404
+        
+        # 查询数据
+        total_count = table_class.query.count()
+        total_pages = (total_count + size - 1) // size
+        
+        data = table_class.query.offset(offset).limit(size).all()
+        
+        # 获取列名
+        columns = [c.key for c in table_class.__table__.columns]
+        
+        # 转换为字典列表
+        data_list = []
+        for row in data:
+            row_dict = {}
+            for col in columns:
+                value = getattr(row, col)
+                # 处理特殊类型
+                if isinstance(value, datetime):
+                    value = value.strftime('%Y-%m-%d %H:%M:%S')
+                elif isinstance(value, bytes):
+                    value = value.decode('utf-8', errors='ignore')
+                row_dict[col] = value
+            data_list.append(row_dict)
+        
+        return jsonify({
+            'success': True,
+            'columns': columns,
+            'data': data_list,
+            'total_pages': total_pages,
+            'current_page': page
+        })
+    except Exception as e:
+        print(f"获取表数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')
