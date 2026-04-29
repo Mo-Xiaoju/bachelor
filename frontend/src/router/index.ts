@@ -83,6 +83,12 @@ const router = createRouter({
       meta: { title: '教学团队 - 教学管理辅助系统' },
     },
     {
+      path: '/database',
+      name: 'database',
+      component: () => import('../views/DatabaseView.vue'),
+      meta: { title: '数据库面板 - 教学管理辅助系统' },
+    },
+    {
       path: '/company',
       name: 'company',
       component: () => import('../views/CompanyView.vue'),
