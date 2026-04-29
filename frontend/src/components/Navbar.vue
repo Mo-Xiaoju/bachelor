@@ -129,6 +129,7 @@ watch(() => route.path, () => {
 
         <RouterLink to="/logout" class="nav-link" @click="logout" v-if="user">退出登录</RouterLink>
         <RouterLink to="/admin" class="nav-link" v-if="user?.role=='admin'">管理员面板</RouterLink>
+        <RouterLink to="/database" class="nav-link" v-if="user?.role=='admin'">数据库面板</RouterLink>
 
 
 
