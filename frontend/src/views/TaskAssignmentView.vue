@@ -74,13 +74,22 @@ const studentLogs = ref<any[]>([])
 const loadingStudents = ref(false)
 const loadingStudentLogs = ref(false)
 
+// 搜索和筛选
+const searchKeyword = ref('')
+const startDate = ref('')
+const endDate = ref('')
+
 // 获取教师的学生列表
 const getStudents = async () => {
   if (user.value?.role !== 'teacher') return
   loadingStudents.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(buildURL('/api/teacher/students'), {
+    const params = new URLSearchParams()
+    if (searchKeyword.value) {
+      params.append('keyword', searchKeyword.value)
+    }
+    const response = await fetch(buildURL('/api/teacher/students?' + params.toString()), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -103,7 +112,14 @@ const getStudentLogs = async (studentId) => {
   loadingStudentLogs.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(buildURL(`/api/teacher/student-logs/${studentId}`), {
+    const params = new URLSearchParams()
+    if (startDate.value) {
+      params.append('start_date', startDate.value)
+    }
+    if (endDate.value) {
+      params.append('end_date', endDate.value)
+    }
+    const response = await fetch(buildURL(`/api/teacher/student-logs/${studentId}?` + params.toString()), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -118,6 +134,25 @@ const getStudentLogs = async (studentId) => {
   } finally {
     loadingStudentLogs.value = false
   }
+}
+
+const handleSearch = () => {
+  selectedStudentId.value = null
+  studentLogs.value = []
+  getStudents()
+}
+
+const handleDateFilter = () => {
+  if (selectedStudentId.value) {
+    getStudentLogs(selectedStudentId.value)
+  }
+}
+
+const clearFilters = () => {
+  searchKeyword.value = ''
+  startDate.value = ''
+  endDate.value = ''
+  handleSearch()
 }
 
 // 选择学生查看日志
@@ -143,6 +178,17 @@ onMounted(async () => {
         <!-- 左侧学生列表 -->
         <div class="student-list">
           <h3>我的学生</h3>
+          <!-- 学生搜索框 -->
+          <div class="search-container">
+            <input
+              type="text"
+              v-model="searchKeyword"
+              placeholder="搜索学生（用户名/姓名）"
+              @keyup.enter="handleSearch"
+              class="search-input"
+            />
+            <button class="search-btn" @click="handleSearch">搜索</button>
+          </div>
           <div v-if="loadingStudents" class="loading-cell">
             <p>加载中...</p>
           </div>
@@ -157,17 +203,37 @@ onMounted(async () => {
               :class="{ active: selectedStudentId === student.id }"
               @click="selectStudent(student.id)"
             >
-              {{ student.name }}
+              <div class="student-name">{{ student.name }}</div>
+              <div class="student-username">{{ student.username }}</div>
             </div>
           </div>
         </div>
 
         <!-- 右侧日志列表 -->
         <div class="student-logs">
-          <h3 v-if="selectedStudentId">
-            {{ students.find(s => s.id === selectedStudentId)?.name }}的工作日志
-          </h3>
-          <h3 v-else>选择学生查看日志</h3>
+          <div class="logs-header">
+            <h3 v-if="selectedStudentId">
+              {{ students.find(s => s.id === selectedStudentId)?.name }}的工作日志
+            </h3>
+            <h3 v-else>选择学生查看日志</h3>
+
+            <!-- 日期筛选 -->
+            <div v-if="selectedStudentId" class="date-filter">
+              <input
+                type="date"
+                v-model="startDate"
+                placeholder="开始日期"
+              />
+              <span class="date-separator">-</span>
+              <input
+                type="date"
+                v-model="endDate"
+                placeholder="结束日期"
+              />
+              <button class="filter-btn" @click="handleDateFilter">筛选</button>
+              <button class="clear-btn" @click="clearFilters">清除筛选</button>
+            </div>
+          </div>
 
           <div v-if="loadingStudentLogs" class="loading-cell">
             <p>加载中...</p>
@@ -198,93 +264,226 @@ onMounted(async () => {
 .task-assignment-view {
   width: 100%;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f8f9fc;
   padding: 40px 30px;
   box-sizing: border-box;
   margin-top: 60px; /* 为上方导航栏留出空间 */
 }
 
 .task-assignment-container {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
   border-radius: 16px;
   padding: 40px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(10px);
-  max-width: 1200px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  max-width: 1400px;
   margin: 0 auto;
+  border: 1px solid #e8ecf0;
 }
 
 .task-assignment-container h2 {
   color: #2c3e50;
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
   margin: 0 0 30px 0;
-  padding-bottom: 15px;
-  border-bottom: 2px solid #667eea;
+  padding-bottom: 20px;
+  border-bottom: 3px solid #667eea;
   text-align: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .task-container {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: 1fr 3fr;
   gap: 40px;
 }
 
 /* 左侧学生列表 */
 .student-list {
-  background: #f8f9ff;
-  border-radius: 12px;
+  background: #ffffff;
+  border-radius: 16px;
   padding: 30px;
-  border: 1px solid #e0e0e0;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e8ecf0;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
 }
 
 .student-list h3 {
   margin: 0 0 20px 0;
-  color: #333;
-  font-size: 18px;
+  color: #2c3e50;
+  font-size: 20px;
   font-weight: 600;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f0f2f5;
+}
+
+/* 搜索容器 */
+.search-container {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.search-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid #e0e6ed;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.search-btn {
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.search-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 
 .students {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: 500px;
+  max-height: 550px;
   overflow-y: auto;
 }
 
 .student-item {
-  padding: 15px 20px;
-  border-radius: 6px;
+  padding: 18px 20px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: #f8f9ff;
+  border: 2px solid transparent;
+}
+
+.student-name {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.student-username {
+  font-size: 12px;
+  color: #8a9aab;
+  margin-top: 4px;
 }
 
 .student-item:hover {
-  background: #e3f2fd;
+  background: #e8f4fd;
   border-color: #2196f3;
-  transform: translateX(5px);
+  transform: translateX(8px);
 }
 
 .student-item.active {
-  background: #2196f3;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.student-item.active .student-name {
   color: white;
-  border-color: #2196f3;
-  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+}
+
+.student-item.active .student-username {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* 右侧日志列表 */
 .student-logs {
-  background: #f8f9ff;
-  border-radius: 12px;
-  padding: 30px;
-  border: 1px solid #e0e0e0;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e8ecf0;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+}
+
+.logs-header {
+  padding: 30px 30px 20px;
+  border-bottom: 2px solid #f0f2f5;
+}
+
+.logs-header h3 {
+  margin: 0 0 20px 0;
+  color: #2c3e50;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+/* 日期筛选 */
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.date-filter input[type="date"] {
+  padding: 10px 14px;
+  border: 2px solid #e0e6ed;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.date-filter input[type="date"]:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.date-separator {
+  color: #9a9a9a;
+  font-size: 14px;
+}
+
+.filter-btn {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.filter-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(17, 153, 142, 0.3);
+}
+
+.clear-btn {
+  padding: 10px 20px;
+  background: #f0f2f5;
+  color: #6a7a8a;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.clear-btn:hover {
+  background: #e8ecf0;
 }
 
 .student-logs h3 {

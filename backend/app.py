@@ -10,6 +10,7 @@ import jwt
 import random
 import os
 from dotenv import load_dotenv
+import docx
 
 load_dotenv()  # 自动读取当前文件夹下的 .env 文件
 
@@ -719,6 +720,13 @@ def apply_internship():
         if file.filename == '':
             return jsonify({'success': False, 'message': '请选择文件'})
         
+        # 验证文件类型（只允许pdf和docx）
+        allowed_extensions = {'pdf', 'docx'}
+        file_extension = file.filename.split('.')[-1].lower() if '.' in file.filename else ''
+        
+        if file_extension not in allowed_extensions:
+            return jsonify({'success': False, 'message': '请上传PDF或DOCX格式的简历文件，不支持DOC格式'})
+        
         internship_id = request.form.get('internship_id')
         if not internship_id:
             return jsonify({'success': False, 'message': '缺少实习ID'})
@@ -729,6 +737,14 @@ def apply_internship():
         internship = Internship.query.get(internship_id)
         if not internship:
             return jsonify({'success': False, 'message': '实习信息不存在'})
+        
+        # 检查学生是否已有确认的实习记录
+        confirmed_application = InternshipApplication.query.filter_by(
+            student_id=user_id,
+            status='confirmed'
+        ).first()
+        if confirmed_application:
+            return jsonify({'success': False, 'message': '您已有一份已确认的实习记录，不能再申请其他实习'})
         
         # 检查是否已经申请
         existing_application = InternshipApplication.query.filter_by(
@@ -785,9 +801,10 @@ def get_company_applications():
         internships = Internship.query.filter_by(company_id=company.id).all()
         internship_ids = [internship.id for internship in internships]
         
-        # 获取申请
+        # 获取申请（只获取状态为pending的申请）
         applications = InternshipApplication.query.filter(
-            InternshipApplication.internship_id.in_(internship_ids)
+            InternshipApplication.internship_id.in_(internship_ids),
+            InternshipApplication.status == 'pending'
         ).all()
         
         # 构建响应数据
@@ -962,6 +979,70 @@ def view_resume(filename):
         print(f"查看简历失败: {str(e)}")
         return jsonify({'success': False, 'message': f'查看失败: {str(e)}'})
 
+# 获取Word文档文本内容（用于预览）
+@app.route('/api/internship/resume/text/<filename>', methods=['GET'])
+@login_required
+def get_resume_text(filename):
+    """获取Word文档文本内容"""
+    try:
+        # 安全处理文件名
+        import posixpath
+        import ntpath
+        filename = posixpath.basename(filename)
+        filename = ntpath.basename(filename)
+        
+        filepath = os.path.join(UPLOAD_FOLDER_RESUME, filename)
+        
+        if not os.path.exists(filepath):
+            return jsonify({'success': False, 'message': '文件不存在'}), 404
+        
+        # 获取文件扩展名
+        ext = filename.split('.')[-1].lower()
+        
+        if ext == 'docx':
+            try:
+                from docx import Document
+                doc = Document(filepath)
+                full_text = []
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        full_text.append(para.text)
+                text_content = '\n'.join(full_text)
+                return jsonify({'success': True, 'content': text_content})
+            except ImportError:
+                print("错误：未安装python-docx库")
+                return jsonify({'success': False, 'message': '未安装python-docx库'}), 500
+            except Exception as e:
+                print(f"解析docx失败: {str(e)}")
+                return jsonify({'success': False, 'message': f'解析失败: {str(e)}'}), 500
+        elif ext == 'doc':
+            # .doc格式不支持在线预览，需要下载查看
+            print("提示：.doc格式不支持在线预览")
+            return jsonify({'success': False, 'message': '.doc格式不支持在线预览，请下载后查看'}), 400
+        
+        return jsonify({'success': False, 'message': '不支持的文件格式'}), 400
+    except Exception as e:
+        print(f"获取简历文本失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
+
+# 检查学生是否已有确认的实习记录
+@app.route('/api/student/has-confirmed-internship', methods=['GET'])
+@login_required
+def check_has_confirmed_internship():
+    """检查学生是否已有确认的实习记录"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        confirmed_application = InternshipApplication.query.filter_by(
+            student_id=user_id,
+            status='confirmed'
+        ).first()
+        
+        return jsonify({'success': True, 'has_confirmed': confirmed_application is not None})
+    except Exception as e:
+        print(f"检查实习记录失败: {str(e)}")
+        return jsonify({'success': False, 'message': '检查失败', 'has_confirmed': False})
+
 # 学生获取自己的实习申请列表
 @app.route('/api/student/applications', methods=['GET'])
 @login_required
@@ -1119,9 +1200,10 @@ def get_student_logs():
 @app.route('/api/teacher/students', methods=['GET'])
 @login_required
 def get_teacher_students():
-    """教师获取自己的学生列表"""
+    """教师获取自己的学生列表（支持搜索）"""
     try:
         user_id = request.current_user['user_id']
+        keyword = request.args.get('keyword', '').strip()
         
         # 通过双选结果获取学生
         results = DoubleSelectionResult.query.filter_by(teacher_id=user_id).all()
@@ -1131,6 +1213,10 @@ def get_teacher_students():
         for result in results:
             student = User.query.get(result.student_id)
             if student:
+                # 如果有搜索关键词，进行过滤
+                if keyword:
+                    if keyword.lower() not in student.realname.lower() and keyword.lower() not in student.username.lower():
+                        continue
                 students.append({
                     'id': student.id,
                     'name': student.realname,
@@ -1147,9 +1233,13 @@ def get_teacher_students():
 @app.route('/api/teacher/student-logs/<int:student_id>', methods=['GET'])
 @login_required
 def get_student_logs_by_teacher(student_id):
-    """教师获取学生的工作日志"""
+    """教师获取学生的工作日志（支持日期筛选）"""
     try:
         teacher_id = request.current_user['user_id']
+        
+        # 获取日期筛选参数
+        start_date = request.args.get('start_date', '')
+        end_date = request.args.get('end_date', '')
         
         # 验证学生是否属于该教师
         result = DoubleSelectionResult.query.filter_by(
@@ -1161,7 +1251,15 @@ def get_student_logs_by_teacher(student_id):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         
         # 获取学生的日志
-        logs = WorkLog.query.filter_by(student_id=student_id).order_by(WorkLog.date.desc()).all()
+        query = WorkLog.query.filter_by(student_id=student_id)
+        
+        # 日期筛选
+        if start_date:
+            query = query.filter(WorkLog.date >= start_date)
+        if end_date:
+            query = query.filter(WorkLog.date <= end_date)
+        
+        logs = query.order_by(WorkLog.date.desc()).all()
         
         # 构建响应数据
         log_list = []
@@ -1316,16 +1414,33 @@ def create_team_application():
 @app.route('/api/team/my-teams', methods=['GET'])
 @login_required
 def get_my_teams():
-    """获取我的团队"""
+    """获取我的团队（支持分页和搜索）"""
     try:
         user_id = request.current_user['user_id']
+        
+        # 获取分页参数
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        keyword = request.args.get('keyword', '')
         
         # 获取用户参与的所有团队
         team_memberships = TeamMember.query.filter_by(user_id=user_id).all()
         team_ids = [tm.team_id for tm in team_memberships]
         
         # 获取这些团队的详细信息
-        teams = Team.query.filter(Team.id.in_(team_ids)).all()
+        query = Team.query.filter(Team.id.in_(team_ids))
+        
+        # 关键词搜索
+        if keyword:
+            query = query.filter(Team.theme.like(f'%{keyword}%'))
+        
+        # 排序
+        query = query.order_by(Team.create_time.desc())
+        
+        # 分页
+        total_count = query.count()
+        total_pages = (total_count + page_size - 1) // page_size
+        teams = query.offset((page - 1) * page_size).limit(page_size).all()
         
         # 构建响应数据
         team_list = []
@@ -1369,7 +1484,7 @@ def get_my_teams():
                 'is_initiator': team.initiator_id == user_id
             })
         
-        return jsonify({'success': True, 'teams': team_list})
+        return jsonify({'success': True, 'teams': team_list, 'total_pages': total_pages})
     except Exception as e:
         print(f"获取我的团队失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
