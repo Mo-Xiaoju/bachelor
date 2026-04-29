@@ -38,6 +38,24 @@ const myTeams = ref<any[]>([])
 const teamRequests = ref<any[]>([])
 const loadingTeams = ref(false)
 
+// 已组成团队的分页和搜索
+const teamSearchKeyword = ref('')
+const currentTeamPage = ref(1)
+const teamPageSize = ref(1)
+const totalTeamPages = ref(1)
+
+// 状态映射
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    'pending': '待审批',
+    'approved': '已批准',
+    'rejected': '已拒绝',
+    'dissolving': '解散申请中',
+    'dissolved': '已解散'
+  }
+  return labels[status] || status
+}
+
 // 从 sessionStorage 获取用户信息
 const getStoredUser = (): any => {
   const userStr = sessionStorage.getItem('user')
@@ -256,11 +274,20 @@ const submitTeamApplication = async () => {
 }
 
 // 获取我的团队
-const getMyTeams = async () => {
+const getMyTeams = async (page: number = 1) => {
   loadingTeams.value = true
+  currentTeamPage.value = page
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(buildURL('/api/team/my-teams'), {
+    const params = new URLSearchParams()
+    params.append('page', page.toString())
+    params.append('page_size', teamPageSize.value.toString())
+
+    if (teamSearchKeyword.value) {
+      params.append('keyword', teamSearchKeyword.value)
+    }
+
+    const response = await fetch(buildURL('/api/team/my-teams?' + params.toString()), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -271,6 +298,7 @@ const getMyTeams = async () => {
       const result = await response.json()
       if (result.success) {
         myTeams.value = result.teams
+        totalTeamPages.value = result.total_pages || 1
       }
     }
   } catch (error) {
@@ -278,6 +306,10 @@ const getMyTeams = async () => {
   } finally {
     loadingTeams.value = false
   }
+}
+
+const handleTeamSearch = () => {
+  getMyTeams(1)
 }
 
 const applyDissolveTeam = async (teamId: number) => {
@@ -429,7 +461,18 @@ onMounted(() => {
 
           <!-- 已组成的团队 -->
           <div class="team-section">
-            <h3>已组成的团队</h3>
+            <div class="section-header">
+              <h3>已组成的团队</h3>
+              <div class="search-box">
+                <input
+                  type="text"
+                  v-model="teamSearchKeyword"
+                  placeholder="搜索团队名称..."
+                  @keyup.enter="handleTeamSearch"
+                />
+                <button class="search-btn" @click="handleTeamSearch">搜索</button>
+              </div>
+            </div>
             <div v-if="loadingTeams" class="loading">
               <p>加载中...</p>
             </div>
@@ -444,10 +487,28 @@ onMounted(() => {
                   - {{ course.courseName }} ({{ course.teacherNames.join(', ') }})
                 </div>
                 <p><strong>成员：</strong>{{ team.members.map((m: any) => m.realname).join(', ') }}</p>
-                <p><strong>状态：</strong>{{ team.status }}</p>
+                <p><strong>状态：</strong>{{ getStatusLabel(team.status) }}</p>
                 <button v-if="team.status === 'pending'" class="submit-btn">提交管理员确认</button>
                 <button v-if="team.status === 'approved' && team.is_initiator" class="dissolve-btn" @click="applyDissolveTeam(team.id)">申请解散团队</button>
               </div>
+            </div>
+            <!-- 分页 -->
+            <div v-if="totalTeamPages > 1" class="pagination">
+              <button
+                class="page-btn"
+                :disabled="currentTeamPage === 1"
+                @click="getMyTeams(currentTeamPage - 1)"
+              >
+                上一页
+              </button>
+              <span class="page-info">第 {{ currentTeamPage }} / {{ totalTeamPages }} 页</span>
+              <button
+                class="page-btn"
+                :disabled="currentTeamPage === totalTeamPages"
+                @click="getMyTeams(currentTeamPage + 1)"
+              >
+                下一页
+              </button>
             </div>
           </div>
         </div>
@@ -685,18 +746,66 @@ onMounted(() => {
 /* 团队部分 */
 .team-section {
   margin-bottom: 30px;
-  background-color: #fff;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
 .team-section h3 {
-  font-size: 1.2rem;
-  color: #333;
-  margin-bottom: 15px;
-  border-bottom: 1px solid #e0e0e0;
-  padding-bottom: 10px;
+  font-size: 1.4rem;
+  color: #2c3e50;
+  margin-bottom: 0;
+  font-weight: 600;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.team-section .search-box {
+  display: flex;
+  gap: 10px;
+}
+
+.team-section .search-box input {
+  padding: 10px 16px;
+  border: 2px solid #e0e6ed;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  width: 200px;
+}
+
+.team-section .search-box input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.team-section .search-btn {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.team-section .search-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 
 /* 团队请求卡片 */
@@ -715,9 +824,14 @@ onMounted(() => {
 
 .course-item {
   margin-left: 20px;
-  margin-bottom: 5px;
+  margin-bottom: 10px;
   font-size: 14px;
-  color: #555;
+  color: #5a6a7a;
+  padding: 8px 12px;
+  background: #f8f9ff;
+  border-radius: 8px;
+  border: 1px solid #e8ecf0;
+  display: inline-block;
 }
 
 .request-status {
@@ -799,25 +913,73 @@ onMounted(() => {
 }
 
 /* 团队卡片 */
+.teams-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .team-card {
-  background-color: #f9f9f9;
-  border-radius: 6px;
-  padding: 15px;
-  margin-bottom: 10px;
-  border-left: 4px solid #4caf50;
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 0;
+  border: 1px solid #e0e6ed;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.team-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+}
+
+.team-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
+  border-color: rgba(102, 126, 234, 0.3);
 }
 
 .team-card h4 {
   margin-top: 0;
-  color: #333;
+  color: #2c3e50;
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-left: 20px;
 }
 
 .submit-btn {
-  background-color: #007bff;
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
   color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
+  padding: 12px 24px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  margin-top: 16px;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(17, 153, 142, 0.4);
+}
+
+.dissolve-btn {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 10px;
   cursor: pointer;
   transition: background-color 0.3s ease;
   margin-top: 10px;
@@ -1199,18 +1361,65 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  color: #666;
+  padding: 40px;
+  color: #6a7a8a;
+  font-size: 14px;
 }
 
 .empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  color: #666;
-  background-color: #f9f9f9;
-  border-radius: 6px;
+  padding: 40px;
+  color: #6a7a8a;
+  background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+  border-radius: 12px;
+  border: 1px dashed #e8ecf0;
+  font-size: 14px;
+}
+
+/* 分页样式 */
+.team-section .pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e8ecf0;
+}
+
+.team-section .page-btn {
+  padding: 12px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.team-section .page-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.team-section .page-btn:disabled {
+  background: #e0e6ed;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.team-section .page-info {
+  font-size: 14px;
+  color: #6a7a8a;
+  font-weight: 500;
+  padding: 8px 16px;
+  background: #f8f9ff;
+  border-radius: 8px;
 }
 
 /* 响应式设计 */
