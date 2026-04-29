@@ -582,7 +582,11 @@ onUnmounted(() => {
                             ? '已批准'
                             : team.status === 'rejected'
                               ? '已拒绝'
-                              : team.status
+                              : team.status === 'dissolving'
+                                ? '解散申请中'
+                                : team.status === 'dissolved'
+                                  ? '已解散'
+                                  : team.status
                       }}
                     </span>
                   </td>

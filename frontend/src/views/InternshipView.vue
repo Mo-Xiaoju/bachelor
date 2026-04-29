@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { buildURL } from '../utils/api'
 
@@ -265,7 +265,33 @@ const showApplyDialog = ref(false)
 const currentInternshipId = ref(0)
 const resumeFile = ref<File | null>(null)
 
-const applyInternship = (id: number) => {
+// 检查学生是否已有确认的实习记录
+const checkHasConfirmedInternship = async (): Promise<boolean> => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/student/has-confirmed-internship'), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    return result.has_confirmed || false
+  } catch (error) {
+    console.error('检查实习记录失败', error)
+    return false
+  }
+}
+
+const applyInternship = async (id: number) => {
+  // 先检查是否已有确认的实习记录
+  const hasConfirmed = await checkHasConfirmedInternship()
+  if (hasConfirmed) {
+    alert('您已有一份已确认的实习记录，不能再申请其他实习')
+    return
+  }
+
   currentInternshipId.value = id
   showApplyDialog.value = true
 }
@@ -273,7 +299,33 @@ const applyInternship = (id: number) => {
 const handleResumeChange = (event: Event) => {
   const target = event.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
-    resumeFile.value = target.files[0]
+    const file = target.files[0]
+    // 验证文件类型（只允许pdf和docx）
+    const allowedTypes = ['application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    const fileExtension = file.name.split('.').pop()?.toLowerCase()
+
+    // 只允许pdf和docx格式
+    if (!allowedTypes.includes(file.type) && !['pdf', 'docx'].includes(fileExtension || '')) {
+      errorMessage.value = '请上传PDF或DOCX格式的简历文件，不支持DOC格式'
+      resumeFile.value = null
+      setTimeout(() => {
+        errorMessage.value = ''
+      }, 3000)
+      return
+    }
+
+    // 特别提示：不支持doc格式
+    if (fileExtension === 'doc') {
+      errorMessage.value = '不支持DOC格式，请使用DOCX或PDF格式'
+      resumeFile.value = null
+      setTimeout(() => {
+        errorMessage.value = ''
+      }, 3000)
+      return
+    }
+
+    resumeFile.value = file
   }
 }
 
@@ -382,6 +434,12 @@ const showLogDialog = ref(false)
 const editingLogId = ref(null)
 const isEditing = ref(false)
 
+// 检查今日是否已发布日志
+const hasLogToday = computed(() => {
+  const today = new Date().toISOString().split('T')[0]
+  return logs.value.some(log => log.date === today)
+})
+
 // 获取学生日志列表
 const getStudentLogs = async () => {
   try {
@@ -421,11 +479,22 @@ const submitLog = async () => {
     return
   }
 
+  // 非编辑模式下，检查今日是否已发布日志
+  if (!isEditing.value && hasLogToday.value) {
+    errorMessage.value = '今日已发布过日志，一天只能发布一次'
+    setTimeout(() => {
+      errorMessage.value = ''
+    }, 3000)
+    return
+  }
+
   try {
     const token = sessionStorage.getItem('token')
     const formData = new FormData()
     formData.append('content', logForm.value.content)
-    formData.append('date', logForm.value.date)
+    // 锁定日期为当前日期
+    const today = new Date().toISOString().split('T')[0]
+    formData.append('date', today)
     if (logForm.value.file) {
       formData.append('file', logForm.value.file)
     }
@@ -510,6 +579,62 @@ const currentApplication = computed(() => {
   const startIndex = (currentPage.value - 1) * itemsPerPage.value
   return internshipApplications.value[startIndex]
 })
+
+// Word文档内容预览
+const wordContent = ref('')
+const loadingWordContent = ref(false)
+
+// 获取Word文档内容
+const getWordContent = async (filename: string) => {
+  // .doc格式不支持在线预览
+  if (!filename || (!filename.toLowerCase().endsWith('.doc') && !filename.toLowerCase().endsWith('.docx'))) {
+    wordContent.value = ''
+    return
+  }
+
+  // .doc格式不支持在线预览
+  if (filename.toLowerCase().endsWith('.doc')) {
+    wordContent.value = ''
+    loadingWordContent.value = false
+    return
+  }
+
+  loadingWordContent.value = true
+  wordContent.value = ''
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/internship/resume/text/${filename}`), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      wordContent.value = result.content
+    }
+  } catch (error) {
+    console.error('获取Word文档内容失败', error)
+  } finally {
+    loadingWordContent.value = false
+  }
+}
+
+// 监听当前申请变化，获取Word文档内容
+watch(currentApplication, (newVal) => {
+  if (newVal && newVal.resume_file) {
+    if (newVal.resume_file.toLowerCase().endsWith('.doc') ||
+        newVal.resume_file.toLowerCase().endsWith('.docx')) {
+      getWordContent(newVal.resume_file)
+    } else {
+      wordContent.value = ''
+    }
+  } else {
+    wordContent.value = ''
+  }
+}, { immediate: true })
 
 // 翻页
 const goToPage = (page) => {
@@ -866,7 +991,45 @@ onMounted(async () => {
             <div class="resume-section">
               <h5>学生简历</h5>
               <div v-if="currentApplication.resume_file" class="resume-content">
-                <iframe :src="`${buildURL(`/api/internship/resume/${currentApplication.resume_file}`)}?token=${getToken()}`" width="100%" height="600px" frameborder="0"></iframe>
+                <!-- PDF文件预览 -->
+                <template v-if="currentApplication.resume_file.toLowerCase().endsWith('.pdf')">
+                  <div class="resume-preview">
+                    <iframe :src="`${buildURL(`/api/internship/resume/${currentApplication.resume_file}`)}?token=${getToken()}`"
+                            width="100%"
+                            height="800px"
+                            frameborder="0">
+                    </iframe>
+                  </div>
+                  <a :href="`${buildURL(`/api/internship/resume/${currentApplication.resume_file}`)}?token=${getToken()}`"
+                     download class="download-link">
+                    📥 下载简历
+                  </a>
+                </template>
+                <!-- Word文件 -->
+                <template v-else-if="currentApplication.resume_file.toLowerCase().endsWith('.doc') ||
+                                     currentApplication.resume_file.toLowerCase().endsWith('.docx')">
+                  <div class="word-preview">
+                    <p>📄 文档类型：Microsoft Word</p>
+                    <p>文件名：{{ currentApplication.resume_file }}</p>
+
+                    <!-- Word文档内容预览 -->
+                    <div v-if="wordContent" class="word-content-preview">
+                      <h6>内容预览：</h6>
+                      <pre class="word-text">{{ wordContent }}</pre>
+                    </div>
+                    <div v-else-if="loadingWordContent" class="loading-indicator">
+                      <p>正在加载文档内容...</p>
+                    </div>
+
+                    <div class="preview-actions">
+                      <a :href="`${buildURL(`/api/internship/resume/${currentApplication.resume_file}`)}?token=${getToken()}`"
+                         download class="download-btn">
+                        📥 下载文档
+                      </a>
+                    </div>
+                    <p class="word-tip">下载后可使用Microsoft Word或WPS等软件打开查看完整内容</p>
+                  </div>
+                </template>
               </div>
               <div v-else class="empty-resume">
                 <p>暂无简历</p>
@@ -971,13 +1134,14 @@ onMounted(async () => {
         <h3>投递简历</h3>
         <p>请上传您的简历，我们会尽快审核您的申请。</p>
         <div class="file-upload">
-          <input type="file" @change="handleResumeChange" class="file-input" id="resumeInput">
+          <input type="file" @change="handleResumeChange" class="file-input" id="resumeInput" accept=".pdf,.docx">
           <label for="resumeInput" class="file-label">
             <span class="upload-icon">📄</span>
-            <span v-if="!resumeFile" class="upload-text">点击或拖拽文件到此处上传简历</span>
+            <span v-if="!resumeFile" class="upload-text">点击或拖拽文件到此处上传简历（支持PDF、DOCX格式）</span>
             <span v-else class="upload-text">已选择：{{ resumeFile.name }}</span>
           </label>
         </div>
+        <p class="file-tip">支持上传 PDF (.pdf) 和 DOCX (.docx) 格式的文件，<strong>不支持DOC格式</strong></p>
         <div class="modal-actions">
           <button @click="showApplyDialog = false">取消</button>
           <button class="primary-btn" @click="submitApplication" :disabled="!resumeFile">提交</button>
@@ -1005,8 +1169,12 @@ onMounted(async () => {
         <div class="form-row">
           <div class="form-item">
             <label>日期：</label>
-            <input type="date" v-model="logForm.date" />
+            <input type="date" v-model="logForm.date" readonly class="readonly-input" />
+            <span class="input-tip">日期自动锁定为当前日期</span>
           </div>
+        </div>
+        <div v-if="!isEditing && hasLogToday" class="warning-message">
+          <p>⚠️ 今日已发布过日志，一天只能发布一次</p>
         </div>
         <div class="form-row">
           <div class="form-item full-width">
@@ -1486,6 +1654,32 @@ onMounted(async () => {
   min-width: 250px;
 }
 
+.form-item .readonly-input {
+  background: #f5f7fa;
+  cursor: not-allowed;
+  color: #909399;
+}
+
+.form-item .input-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.warning-message {
+  background: #fef0f0;
+  border: 1px solid #fbc4c4;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.warning-message p {
+  margin: 0;
+  color: #f56c6c;
+  font-size: 14px;
+}
+
 .form-item.full-width {
   flex: 100%;
 }
@@ -1730,15 +1924,127 @@ onMounted(async () => {
   border: 1px solid #e6e6e6;
   border-radius: 4px;
   overflow: hidden;
-}
-
 .empty-resume {
   text-align: center;
   padding: 60px 20px;
   background: white;
   border: 1px dashed #dcdfe6;
   border-radius: 4px;
+}
+
+.resume-content {
+  margin-top: 10px;
+}
+
+.resume-preview {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.word-preview {
+  padding: 30px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  text-align: center;
+  background: #fafafa;
+}
+
+.word-preview p {
+  margin-bottom: 20px;
+  color: #666;
+  font-size: 15px;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.download-btn {
+  padding: 10px 24px;
+  border-radius: 6px;
+  text-decoration: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  display: inline-block;
+}
+
+.download-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.word-tip {
+  margin-top: 16px;
+  font-size: 13px;
   color: #909399;
+  line-height: 1.6;
+}
+
+.word-content-preview {
+  margin-top: 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.word-content-preview h6 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.word-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #444;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.loading-indicator {
+  padding: 20px;
+  text-align: center;
+  color: #909399;
+}
+
+.word-text-empty {
+  padding: 16px;
+  text-align: center;
+  color: #909399;
+  background: #fafafa;
+  border-radius: 8px;
+}
+
+.download-link {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 10px 20px;
+  background: #f5f5f5;
+  color: #333;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.download-link:hover {
+  background: #e8e8e8;
+} color: #909399;
 }
 
 /* 申请操作按钮 */
