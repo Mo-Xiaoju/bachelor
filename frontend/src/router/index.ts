@@ -47,6 +47,12 @@ const router = createRouter({
       meta: { title: '实习管理 - 教学管理辅助系统' },
     },
     {
+      path: '/internship/detail/:id',
+      name: 'internship-detail',
+      component: () => import('../views/InternshipDetailView.vue'),
+      meta: { title: '实习详情 - 教学管理辅助系统' },
+    },
+    {
       path: '/task-assignment',
       name: 'task-assignment',
       component: () => import('../views/TaskAssignmentView.vue'),
@@ -99,6 +105,12 @@ const router = createRouter({
       name: 'company-students',
       component: () => import('../views/CompanyStudentView.vue'),
       meta: { title: '学生管理 - 企业管理系统' },
+    },
+    {
+      path: '/company/internship',
+      name: 'company-internship',
+      component: () => import('../views/InternshipView.vue'),
+      meta: { title: '实习管理 - 企业管理系统' },
     },
   ],
 })
