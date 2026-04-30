@@ -52,6 +52,7 @@ const studentMenuItems = computed(() => {
 // 企业用户菜单项
 const companyMenuItems = ref([
   { name: '实习公告', category: '实习管理' },
+  { name: '实习报名', category: '实习管理' },
   { name: '实习审核', category: '实习管理' },
 ])
 
@@ -70,6 +71,27 @@ const carouselTimer = ref<any>(null)
 const internships = ref<any[]>([])
 // 实习申请数据（企业审核用）
 const internshipApplications = ref<any[]>([])
+
+// 搜索关键词
+const searchKeyword = ref('')
+
+// 过滤后的实习列表
+const filteredInternships = computed(() => {
+  if (!searchKeyword.value) {
+    return internships.value
+  }
+  const keyword = searchKeyword.value.toLowerCase()
+  return internships.value.filter(item => {
+    return (
+      item.company.toLowerCase().includes(keyword) ||
+      item.position.toLowerCase().includes(keyword) ||
+      item.city.toLowerCase().includes(keyword) ||
+      item.location.toLowerCase().includes(keyword) ||
+      (item.skillTags && item.skillTags.some(tag => tag.toLowerCase().includes(keyword))) ||
+      (item.welfareTags && item.welfareTags.some(tag => tag.toLowerCase().includes(keyword)))
+    )
+  })
+})
 
 // 获取实习招聘列表
 const getInternships = async () => {
@@ -264,6 +286,11 @@ const handleMenuClick = (item: any) => {
 const showApplyDialog = ref(false)
 const currentInternshipId = ref(0)
 const resumeFile = ref<File | null>(null)
+
+// 跳转到实习详情页
+const goToDetail = (id: number) => {
+  router.push(`/internship/detail/${id}`)
+}
 
 // 检查学生是否已有确认的实习记录
 const checkHasConfirmedInternship = async (): Promise<boolean> => {
@@ -809,6 +836,23 @@ onMounted(async () => {
 
         <!-- 实习报名页面 -->
         <div v-else-if="activeMenu === '实习报名'" class="content-section">
+          <!-- 搜索框 -->
+          <div class="search-section">
+            <div class="search-box">
+              <input
+                type="text"
+                v-model="searchKeyword"
+                placeholder="搜索实习单位、岗位、城市或标签..."
+                class="search-input"
+              />
+              <button class="search-btn" @click="searchKeyword = searchKeyword.trim()">
+                🔍
+              </button>
+            </div>
+            <div class="search-result-count">
+              共找到 {{ filteredInternships.length }} 条实习信息
+            </div>
+          </div>
           <div class="registration-list">
             <table class="internship-table">
               <thead>
@@ -825,7 +869,7 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="internship in internships" :key="internship.id">
+              <tr v-for="internship in filteredInternships" :key="internship.id">
                 <td>{{ internship.company }}</td>
                 <td>
                   <div>{{ internship.position }}</div>
@@ -847,12 +891,20 @@ onMounted(async () => {
                 <td>{{ internship.registeredCount }}</td>
                 <td>{{ internship.deadline }}</td>
                 <td class="operation">
-                  <a v-if="!internship.registered" href="#" @click.prevent="applyInternship(internship.id)">报名</a>
-                  <span v-else class="registered-badge">已报名</span>
+                  <div class="operation-buttons">
+                    <a v-if="!internship.registered && isStudent" href="#" @click.prevent="applyInternship(internship.id)" class="apply-link">报名</a>
+                    <span v-else-if="isCompany" class="registered-badge">企业用户</span>
+                    <span v-else-if="internship.registered" class="registered-badge">已报名</span>
+                    <a href="#" @click.prevent="goToDetail(internship.id)" class="detail-link">查看详情</a>
+                  </div>
                 </td>
               </tr>
             </tbody>
             </table>
+            <!-- 无搜索结果提示 -->
+            <div v-if="filteredInternships.length === 0" class="empty-state">
+              <p>暂无匹配的实习信息</p>
+            </div>
           </div>
         </div>
 
@@ -1540,11 +1592,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: row;
   gap: 10px;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
   height: 100%;
   padding: 15px;
   flex-wrap: nowrap;
+}
+
+.operation-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .log-file a {
@@ -1590,6 +1648,86 @@ onMounted(async () => {
 .registered-badge {
   color: #909399;
   font-size: 13px;
+}
+
+/* 搜索区域样式 */
+.search-section {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 8px 16px;
+  border: 1px solid #e4e7ed;
+  flex: 1;
+  max-width: 500px;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  padding: 10px;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: #909399;
+}
+
+.search-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 5px;
+}
+
+.search-btn:hover {
+  opacity: 0.7;
+}
+
+.search-result-count {
+  font-size: 14px;
+  color: #666;
+}
+
+/* 操作链接样式 */
+.operation-buttons a,
+.operation-buttons span {
+  text-decoration: none;
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  transition: all 0.3s;
+  display: inline-block;
+  text-align: center;
+}
+
+.detail-link {
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+.detail-link:hover {
+  background: #dbeafe;
+}
+
+.apply-link {
+  color: #67c23a;
+  background: #f0f9eb;
+}
+
+.apply-link:hover {
+  background: #dcfce7;
 }
 
 /* 卡片列表 */

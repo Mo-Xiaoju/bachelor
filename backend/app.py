@@ -51,6 +51,18 @@ ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost,http://loc
 
 CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
+# 处理OPTIONS预检请求
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    response = jsonify({'success': True})
+    origin = request.headers.get('Origin')
+    if origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    return response
+
 # 确保CORS头被正确设置
 @app.after_request
 def after_request(response):
@@ -191,6 +203,8 @@ class Internship(db.Model):
     welfare_tags = db.Column(db.Text)
     quota = db.Column(db.Integer, nullable=False)
     deadline = db.Column(db.Date, nullable=False)
+    experience_requirement = db.Column(db.String(100), default='经验不限')  # 经验要求
+    education_requirement = db.Column(db.String(100), default='学历不限')  # 学历要求
     status = db.Column(db.String(20), default='active')  # active, closed
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -852,7 +866,92 @@ def get_company_applications():
         print(f"获取申请列表失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
 
-# 企业处理申请
+@app.route('/api/internship/<int:internship_id>', methods=['GET'])
+@login_required
+def get_internship_detail(internship_id):
+    """获取实习详情"""
+    try:
+        internship = Internship.query.get(internship_id)
+        if not internship:
+            return jsonify({'success': False, 'message': '实习信息不存在'}), 404
+        
+        company = Company.query.get(internship.company_id)
+        
+        # 计算已报名人数
+        registered_count = InternshipApplication.query.filter_by(
+            internship_id=internship.id
+        ).count()
+        
+        result = {
+            'id': internship.id,
+            'title': internship.title,
+            'company_id': internship.company_id,
+            'companyName': company.company_name if company else '',
+            'companyField': company.field if company else '',
+            'companyNature': company.nature if company else '',
+            'companyScale': company.scale if company else '',
+            'companyDescription': company.description if company else '',
+            'position': internship.position,
+            'city': internship.city,
+            'location': internship.location,
+            'salary': internship.salary or '面议',
+            'experienceRequirement': internship.experience_requirement or '经验不限',
+            'educationRequirement': internship.education_requirement or '学历不限',
+            'quota': internship.quota,
+            'registeredCount': registered_count,
+            'deadline': internship.deadline.strftime('%Y-%m-%d'),
+            'skillTags': internship.skill_tags.split(',') if internship.skill_tags else [],
+            'welfareTags': internship.welfare_tags.split(',') if internship.welfare_tags else [],
+            'description': internship.description,
+            'requirements': internship.requirements,
+            'status': internship.status,
+            'createTime': internship.created_at.strftime('%Y-%m-%d %H:%M:%S') if internship.created_at else ''
+        }
+        
+        return jsonify({'success': True, 'internship': result})
+    except Exception as e:
+        print(f"获取实习详情失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+@app.route('/api/internship/<int:internship_id>', methods=['DELETE'])
+@login_required
+def delete_internship(internship_id):
+    """删除实习信息（仅企业可删除自己发布的实习）"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'company':
+            return jsonify({'success': False, 'message': '只有企业可以删除实习信息'}), 403
+        
+        # 获取企业信息
+        company = Company.query.filter_by(user_id=user_id).first()
+        if not company:
+            return jsonify({'success': False, 'message': '企业信息不存在'}), 404
+        
+        # 获取实习信息
+        internship = Internship.query.get(internship_id)
+        if not internship:
+            return jsonify({'success': False, 'message': '实习信息不存在'}), 404
+        
+        # 检查是否为该企业发布的实习
+        if internship.company_id != company.id:
+            return jsonify({'success': False, 'message': '您只能删除自己发布的实习信息'}), 403
+        
+        # 删除相关的申请记录
+        InternshipApplication.query.filter_by(internship_id=internship_id).delete()
+        
+        # 删除实习信息
+        db.session.delete(internship)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除实习失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
+
+# 初始化数据库企业处理申请
 @app.route('/api/company/application/process', methods=['POST'])
 @login_required
 def process_application():
@@ -958,13 +1057,13 @@ def get_confirmed_students():
             student = User.query.filter_by(id=app.student_id).first()
             internship = Internship.query.filter_by(id=app.internship_id).first()
             
-            # 获取学生的导师信息
+            # 获取学生的导师信息（从双选结果表）
             teacher = None
             if student:
-                # 从双选表中获取导师
-                selection = DoubleSelectionStudent.query.filter_by(student_id=student.id).first()
-                if selection and selection.teacher_id:
-                    teacher = User.query.filter_by(id=selection.teacher_id).first()
+                # 从双选结果表中获取最终匹配的导师
+                result = DoubleSelectionResult.query.filter_by(student_id=student.id).first()
+                if result:
+                    teacher = User.query.filter_by(id=result.teacher_id).first()
             
             if student and internship:
                 student_list.append({
