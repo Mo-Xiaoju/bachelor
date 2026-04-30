@@ -37,13 +37,24 @@ const statusOptions = [
 
 const menuItems = ref([
   { name: '个人信息', path: 'profile' },
-  { name: '我的信息', path: 'my-info' }
+  { name: '我的信息', path: 'my-info' },
+  { name: '修改密码', path: 'change-password' }
 ])
 
 const editForm = ref({
   contact: '',
   email: '',
 })
+
+// 修改密码表单
+const passwordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+
+const passwordError = ref('')
+const passwordSuccess = ref('')
 
 const getToken = (): string | null => {
   const token = sessionStorage.getItem('token')
@@ -217,6 +228,62 @@ const saveContactInfo = async () => {
   } catch (error) {
     console.error('保存联系方式失败', error)
     alert('网络错误，请稍后重试')
+  }
+}
+
+const changePassword = async () => {
+  passwordError.value = ''
+  passwordSuccess.value = ''
+
+  // 验证表单
+  if (!passwordForm.value.oldPassword) {
+    passwordError.value = '请输入旧密码'
+    return
+  }
+  if (!passwordForm.value.newPassword) {
+    passwordError.value = '请输入新密码'
+    return
+  }
+  if (passwordForm.value.newPassword.length < 6) {
+    passwordError.value = '新密码长度不能少于6位'
+    return
+  }
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    passwordError.value = '两次输入的新密码不一致'
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/change-password'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        old_password: passwordForm.value.oldPassword,
+        new_password: passwordForm.value.newPassword
+      }),
+    })
+    const result = await response.json()
+    if (result.success) {
+      passwordSuccess.value = '密码修改成功'
+      passwordForm.value = {
+        oldPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      }
+      setTimeout(() => {
+        passwordSuccess.value = ''
+      }, 3000)
+    } else {
+      passwordError.value = result.message || '修改失败'
+    }
+  } catch (error) {
+    console.error('修改密码失败', error)
+    passwordError.value = '网络错误，请稍后重试'
   }
 }
 
@@ -801,6 +868,49 @@ onMounted(() => {
   color: #666;
 }
 
+/* 修改密码样式 */
+.change-password-content {
+  animation: fadeIn 0.5s ease;
+}
+
+.password-card {
+  background: #f8f9ff;
+  padding: 30px;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+.password-card h3 {
+  color: #2c3e50;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 25px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #667eea;
+}
+
+.password-form {
+  margin-top: 20px;
+}
+
+.error-message {
+  background: #ffebee;
+  color: #c62828;
+  padding: 12px 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+
+.success-message {
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 12px 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+
 </style>
 
 <template>
@@ -969,6 +1079,40 @@ onMounted(() => {
                 >
                   下一页
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 修改密码 -->
+          <div v-if="activeMenu === '修改密码'" class="change-password-content">
+            <div class="password-card">
+              <h3>修改密码</h3>
+
+              <div v-if="passwordError" class="error-message">
+                {{ passwordError }}
+              </div>
+
+              <div v-if="passwordSuccess" class="success-message">
+                {{ passwordSuccess }}
+              </div>
+
+              <div class="password-form">
+                <div class="form-item">
+                  <label>旧密码：</label>
+                  <input type="password" v-model="passwordForm.oldPassword" placeholder="请输入旧密码" />
+                </div>
+                <div class="form-item">
+                  <label>新密码：</label>
+                  <input type="password" v-model="passwordForm.newPassword" placeholder="请输入新密码（至少6位）" />
+                </div>
+                <div class="form-item">
+                  <label>确认新密码：</label>
+                  <input type="password" v-model="passwordForm.confirmPassword" placeholder="请再次输入新密码" />
+                </div>
+                <div class="form-actions">
+                  <button class="save-btn" @click="changePassword">确认修改</button>
+                  <button class="cancel-btn" @click="passwordForm = { oldPassword: '', newPassword: '', confirmPassword: '' }">重置</button>
+                </div>
               </div>
             </div>
           </div>
