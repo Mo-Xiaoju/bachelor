@@ -166,6 +166,7 @@ class ExperimentReport(db.Model):
     __tablename__ = 'experiment_report'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('research_project.id'), nullable=False)  # 绑定的科研项目
     title = db.Column(db.String(100), nullable=False)
     content = db.Column(db.Text, nullable=False)
     date = db.Column(db.Date, nullable=False)
@@ -174,6 +175,7 @@ class ExperimentReport(db.Model):
     
     # 关联
     student = db.relationship('User', backref=db.backref('experiment_reports', lazy=True))
+    project = db.relationship('ResearchProject', backref=db.backref('experiment_reports', lazy=True))
 # 实习招聘表
 class Internship(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -561,6 +563,17 @@ def company_register():
         db.session.add(new_company)
         db.session.commit()
         
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=new_user.id,
+            type='company',
+            status='pending',
+            receipt='企业注册申请',
+            description=f'企业注册申请：{company_name}'
+        )
+        db.session.add(log)
+        db.session.commit()
+        
         return jsonify({'success': True, 'message': '注册成功，请等待管理员审批'})
     except Exception as e:
         db.session.rollback()
@@ -775,6 +788,17 @@ def apply_internship():
         db.session.add(application)
         db.session.commit()
         
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='internship',
+            status='pending',
+            receipt='申请实习',
+            description=f'申请实习：{internship.title}'
+        )
+        db.session.add(log)
+        db.session.commit()
+        
         return jsonify({'success': True, 'message': '申请成功'})
     except Exception as e:
         db.session.rollback()
@@ -801,7 +825,7 @@ def get_company_applications():
         internships = Internship.query.filter_by(company_id=company.id).all()
         internship_ids = [internship.id for internship in internships]
         
-        # 获取申请（只获取状态为pending的申请）
+        # 获取申请（只获取状态为pending的申请，用于实习审核）
         applications = InternshipApplication.query.filter(
             InternshipApplication.internship_id.in_(internship_ids),
             InternshipApplication.status == 'pending'
@@ -922,10 +946,10 @@ def get_confirmed_students():
         internships = Internship.query.filter_by(company_id=company.id).all()
         internship_ids = [internship.id for internship in internships]
         
-        # 获取已确认的申请
+        # 获取已批准和已确认的申请
         applications = InternshipApplication.query.filter(
             InternshipApplication.internship_id.in_(internship_ids),
-            InternshipApplication.status == 'confirmed'
+            InternshipApplication.status.in_(['approved', 'confirmed'])
         ).all()
         
         # 构建学生列表
@@ -933,6 +957,14 @@ def get_confirmed_students():
         for app in applications:
             student = User.query.filter_by(id=app.student_id).first()
             internship = Internship.query.filter_by(id=app.internship_id).first()
+            
+            # 获取学生的导师信息
+            teacher = None
+            if student:
+                # 从双选表中获取导师
+                selection = DoubleSelectionStudent.query.filter_by(student_id=student.id).first()
+                if selection and selection.teacher_id:
+                    teacher = User.query.filter_by(id=selection.teacher_id).first()
             
             if student and internship:
                 student_list.append({
@@ -942,7 +974,12 @@ def get_confirmed_students():
                     'major': student.major or '',
                     'position': internship.position,
                     'confirm_time': app.updated_at.strftime('%Y-%m-%d %H:%M:%S') if app.updated_at else '',
-                    'resume_file': app.resume_file
+                    'resume_file': app.resume_file,
+                    'student_contact': student.contact or '',
+                    'student_email': student.email or '',
+                    'teacher_name': teacher.realname if teacher else '',
+                    'teacher_contact': teacher.contact if teacher else '',
+                    'teacher_email': teacher.email if teacher else ''
                 })
         
         return jsonify({'success': True, 'students': student_list})
@@ -1404,6 +1441,17 @@ def create_team_application():
         
         db.session.commit()
         
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='team',
+            status='pending',
+            receipt='团队组建申请',
+            description=f'申请组建团队：{theme}'
+        )
+        db.session.add(log)
+        db.session.commit()
+        
         return jsonify({'success': True, 'message': '团队申请创建成功'})
     except Exception as e:
         db.session.rollback()
@@ -1757,6 +1805,27 @@ def approve_team():
         team.review_time = datetime.utcnow()
         team.review_comment = comment
         
+        # 更新申请日志状态
+        log = ApplicationLog.query.filter_by(
+            user_id=team.initiator_id,
+            type='team',
+            status='pending',
+            description=f'申请组建团队：{team.theme}'
+        ).first()
+        if not log:
+            # 如果没有找到组建申请日志，尝试查找解散申请日志
+            log = ApplicationLog.query.filter_by(
+                user_id=team.initiator_id,
+                type='team',
+                status='pending',
+                description=f'申请解散团队：{team.theme}'
+            ).first()
+        if log:
+            log.status = 'approved'
+            log.handler_id = user.id
+            log.handler_name = user.realname
+            log.receipt = message
+        
         db.session.commit()
         
         return jsonify({'success': True, 'message': message})
@@ -1803,14 +1872,33 @@ def reject_team():
         else:
             return jsonify({'success': False, 'message': '无效的团队状态'}), 400
         
-        # 更新状态
-        team.status = 'rejected'
         team.review_time = datetime.utcnow()
         team.review_comment = comment
         
+        # 更新申请日志状态
+        log = ApplicationLog.query.filter_by(
+            user_id=team.initiator_id,
+            type='team',
+            status='pending',
+            description=f'申请组建团队：{team.theme}'
+        ).first()
+        if not log:
+            # 如果没有找到组建申请日志，尝试查找解散申请日志
+            log = ApplicationLog.query.filter_by(
+                user_id=team.initiator_id,
+                type='team',
+                status='pending',
+                description=f'申请解散团队：{team.theme}'
+            ).first()
+        if log:
+            log.status = 'rejected'
+            log.handler_id = user.id
+            log.handler_name = user.realname
+            log.receipt = message
+        
         db.session.commit()
         
-        return jsonify({'success': True, 'message': '团队已拒绝'})
+        return jsonify({'success': True, 'message': message})
     except Exception as e:
         db.session.rollback()
         print(f"拒绝团队失败: {str(e)}")
@@ -2478,7 +2566,8 @@ def get_user_application_logs():
 @login_required
 def change_password():
     data = request.get_json()
-    new_password = data.get('newPassword')
+    old_password = data.get('old_password')
+    new_password = data.get('new_password')
     
     if not new_password:
         return jsonify({'success': False, 'message': '新密码不能为空'}), 400
@@ -2501,6 +2590,11 @@ def change_password():
         return jsonify({'success': False, 'message': '令牌格式无效'}), 401
     
     user = User.query.get(user_id)
+    
+    # 如果提供了旧密码，验证旧密码
+    if old_password:
+        if not bcrypt.check_password_hash(user.password_hash, old_password):
+            return jsonify({'success': False, 'message': '旧密码不正确'}), 400
     
     # 加密新密码
     password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
@@ -3148,10 +3242,6 @@ def select_teacher():
     if not teacher or teacher.role != 'teacher':
         return jsonify({'success': False, 'message': '导师不存在'}), 404
     
-    # 检查导师名额
-    if teacher.current_quota >= teacher.max_quota:
-        return jsonify({'success': False, 'message': '该导师名额已满'}), 400
-    
     # 检查是否已经选择了该导师
     existing_selection = TeacherSelection.query.filter_by(
         student_id=user_id,
@@ -3178,6 +3268,17 @@ def select_teacher():
     
     try:
         db.session.add(selection)
+        db.session.commit()
+        
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='double-selection',
+            status='pending',
+            receipt=f'第{priority}志愿选择导师',
+            description=f'第{priority}志愿选择导师：{teacher.realname}'
+        )
+        db.session.add(log)
         db.session.commit()
         
         return jsonify({
@@ -3441,19 +3542,11 @@ def process_selection_results():
                 # 拒绝其他选择
                 for selection in selections[1:]:
                     selection.status = 'rejected'
-                    # 恢复其他导师的名额
-                    teacher = db.session.get(User, selection.teacher_id)
-                    if teacher:
-                        teacher.current_quota = max(0, (teacher.current_quota or 0) - 1)
         
         # 2. 处理第三阶段仍为pending的学生
         pending_selections = TeacherSelection.query.filter_by(status='pending').all()
         for selection in pending_selections:
             selection.status = 'rejected'
-            # 恢复导师名额
-            teacher = db.session.get(User, selection.teacher_id)
-            if teacher:
-                teacher.current_quota = max(0, (teacher.current_quota or 0) - 1)
         
         # 3. 处理最终阶段仍为rejected的学生，随机分配
         # 获取参与双选的学生（从double_selection_student表中）
@@ -4040,6 +4133,17 @@ def register_research_project():
         
         db.session.commit()
         
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='train',
+            status='pending',
+            receipt='报名科研训练项目',
+            description=f'报名科研训练项目：{project.project_name}'
+        )
+        db.session.add(log)
+        db.session.commit()
+        
         return jsonify({
             'success': True,
             'message': '报名成功'
@@ -4365,6 +4469,17 @@ def apply_research_project():
         )
         
         db.session.add(project)
+        db.session.commit()
+        
+        # 添加申请日志
+        log = ApplicationLog(
+            user_id=user_id,
+            type='project',
+            status='pending',
+            receipt='科研训练项目申请',
+            description=f'申请科研训练项目：{data["projectName"]}'
+        )
+        db.session.add(log)
         db.session.commit()
         
         return jsonify({
@@ -4708,21 +4823,24 @@ with app.app_context():
 @app.route('/api/experiment-reports', methods=['GET'])
 @login_required
 def get_experiment_reports():
-    """获取实验报告列表"""
+    """获取实验报告列表（我的实验报告）"""
     try:
         user_id = request.current_user['user_id']
         user = User.query.get(user_id)
         
-        # 无论是学生还是教师，在"我的实验报告"下都只显示自己的实验报告
+        # 无论角色是谁，都只显示自己的实验报告
         reports = ExperimentReport.query.filter_by(student_id=user_id).order_by(ExperimentReport.create_time.desc()).all()
         
         result = []
         for report in reports:
+            project_name = report.project.project_name if report.project else ''
             result.append({
                 'id': report.id,
                 'student_id': report.student_id,
                 'studentName': report.student.realname if report.student else '',
                 'studentUsername': report.student.username if report.student else '',
+                'project_id': report.project_id,
+                'projectName': project_name,
                 'title': report.title,
                 'content': report.content,
                 'date': report.date.strftime('%Y-%m-%d'),
@@ -4750,9 +4868,33 @@ def upload_experiment_report():
         title = request.form.get('title')
         content = request.form.get('content')
         date_str = request.form.get('date')
+        project_id = request.form.get('project_id')
         
         if not title or not content or not date_str:
             return jsonify({'success': False, 'message': '请填写完整的实验报告信息'}), 400
+        
+        # 验证项目ID
+        if not project_id:
+            return jsonify({'success': False, 'message': '请选择科研项目'}), 400
+        
+        try:
+            project_id_int = int(project_id)
+        except ValueError:
+            return jsonify({'success': False, 'message': '项目ID格式不正确'}), 400
+        
+        # 验证项目是否存在
+        project = ResearchProject.query.get(project_id_int)
+        if not project:
+            return jsonify({'success': False, 'message': '科研项目不存在'}), 400
+        
+        # 验证学生是否已报名该项目
+        registration = ResearchRegistration.query.filter_by(
+            student_id=user_id,
+            project_id=project_id_int,
+            status='confirmed'
+        ).first()
+        if not registration:
+            return jsonify({'success': False, 'message': '您未报名或未确认该科研项目，无法上传实验报告'}), 400
         
         # 解析日期
         try:
@@ -4774,6 +4916,7 @@ def upload_experiment_report():
         # 创建实验报告记录
         new_report = ExperimentReport(
             student_id=user_id,
+            project_id=project_id_int,
             title=title,
             content=content,
             date=date,
@@ -4897,12 +5040,15 @@ def get_student_experiment_reports():
             return jsonify({'success': False, 'message': '只有教师和管理员可以查看学生实验报告'}), 403
         
         if user.role == 'teacher':
-            # 教师只能查看自己学生的实验报告
-            # 从双选结果表中获取该教师的学生ID列表
-            teacher_students = DoubleSelectionResult.query.filter_by(teacher_id=user_id).all()
-            student_ids = [result.student_id for result in teacher_students]
-            # 只返回这些学生的实验报告
-            reports = ExperimentReport.query.filter(ExperimentReport.student_id.in_(student_ids)).order_by(ExperimentReport.create_time.desc()).all()
+            # 教师查看自己负责项目下学生的实验报告
+            # 获取教师负责的所有科研项目
+            projects = ResearchProject.query.filter_by(teacher_id=user_id).all()
+            project_ids = [p.id for p in projects]
+            
+            # 获取这些项目下学生的实验报告
+            reports = ExperimentReport.query.filter(
+                ExperimentReport.project_id.in_(project_ids)
+            ).order_by(ExperimentReport.create_time.desc()).all()
         else:
             # 管理员可以查看所有学生的实验报告
             reports = ExperimentReport.query.order_by(ExperimentReport.create_time.desc()).all()
@@ -5049,5 +5195,73 @@ def get_table_data(table_name):
         print(f"获取表数据失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
 
+
+@app.route('/api/database/table/<table_name>/delete/<int:record_id>', methods=['DELETE'])
+@login_required
+def delete_table_record(table_name, record_id):
+    """删除指定数据表中的记录"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        # 允许访问的表
+        allowed_tables = [
+            'user', 'company', 'internship', 'internship_application',
+            'team', 'team_member', 'teacher_selection',
+            'double_selection_teacher', 'double_selection_student',
+            'train_project', 'train_application', 'train_report',
+            'application_log'
+        ]
+        
+        if table_name not in allowed_tables:
+            return jsonify({'success': False, 'message': '不允许访问该表'}), 403
+        
+        # 根据表名获取模型类
+        table_class = None
+        if table_name == 'user':
+            table_class = User
+        elif table_name == 'company':
+            table_class = Company
+        elif table_name == 'internship':
+            table_class = Internship
+        elif table_name == 'internship_application':
+            table_class = InternshipApplication
+        elif table_name == 'team':
+            table_class = Team
+        elif table_name == 'team_member':
+            table_class = TeamMember
+        elif table_name == 'teacher_selection':
+            table_class = TeacherSelection
+        elif table_name == 'double_selection_teacher':
+            table_class = DoubleSelectionTeacher
+        elif table_name == 'double_selection_student':
+            table_class = DoubleSelectionStudent
+        elif table_name == 'train_project':
+            table_class = TrainProject
+        elif table_name == 'train_application':
+            table_class = TrainApplication
+        elif table_name == 'train_report':
+            table_class = TrainReport
+        elif table_name == 'application_log':
+            table_class = ApplicationLog
+        
+        if not table_class:
+            return jsonify({'success': False, 'message': '表不存在'}), 404
+        
+        # 查询并删除记录
+        record = table_class.query.get(record_id)
+        if not record:
+            return jsonify({'success': False, 'message': '记录不存在'}), 404
+        
+        db.session.delete(record)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除记录失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除失败: {str(e)}'})
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')

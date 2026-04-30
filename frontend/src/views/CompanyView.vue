@@ -289,7 +289,13 @@ const openStudentManagement = () => {
   router.push('/company/students')
 }
 
-// 获取学生申请列表
+// 打开学生管理对话框
+const openStudentManagementDialog = async () => {
+  await getConfirmedStudents()
+  showStudentManagement.value = true
+}
+
+// 获取学生申请列表（用于实习审核）
 const getStudentApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
@@ -310,6 +316,30 @@ const getStudentApplications = async () => {
   } catch (error) {
     console.error('获取申请列表失败', error)
     errorMessage.value = '获取申请列表失败，请稍后重试'
+  }
+}
+
+// 获取已确认的学生列表（用于学生管理）
+const getConfirmedStudents = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/company/confirmed-students'), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      studentApplications.value = result.students
+    } else {
+      errorMessage.value = result.message || '获取学生列表失败'
+    }
+  } catch (error) {
+    console.error('获取学生列表失败', error)
+    errorMessage.value = '获取学生列表失败，请稍后重试'
   }
 }
 
@@ -890,7 +920,7 @@ onUnmounted(() => {
             </div>
             <div class="function-item">
               <div class="function-icon">👥</div>
-              <a href="#" class="function-link" @click.prevent="showStudentManagement = true"
+              <a href="#" class="function-link" @click.prevent="openStudentManagementDialog"
                 >学生管理</a
               >
             </div>
@@ -1229,8 +1259,11 @@ onUnmounted(() => {
                   <th>学号</th>
                   <th>申请岗位</th>
                   <th>申请时间</th>
-                  <th>状态</th>
-                  <th>操作</th>
+                  <th>学生联系方式</th>
+                  <th>学生邮箱</th>
+                  <th>导师姓名</th>
+                  <th>导师联系方式</th>
+                  <th>导师邮箱</th>
                 </tr>
               </thead>
               <tbody>
@@ -1239,29 +1272,14 @@ onUnmounted(() => {
                   <td>{{ application.student_id }}</td>
                   <td>{{ application.position }}</td>
                   <td>{{ application.apply_time }}</td>
-                  <td>
-                    <span :class="'status-' + application.status">
-                      {{ getStatusText(application.status) }}
-                    </span>
-                  </td>
-                  <td class="operation">
-                    <a
-                      v-if="application.status === 'pending'"
-                      href="#"
-                      @click.prevent="approveApplication(application.id)"
-                      >批准</a
-                    >
-                    <a
-                      v-if="application.status === 'pending'"
-                      href="#"
-                      @click.prevent="rejectApplication(application.id)"
-                      >拒绝</a
-                    >
-                    <a href="#" @click.prevent="viewResume(application.id)">查看简历</a>
-                  </td>
+                  <td>{{ application.student_contact || '-' }}</td>
+                  <td>{{ application.student_email || '-' }}</td>
+                  <td>{{ application.teacher_name || '-' }}</td>
+                  <td>{{ application.teacher_contact || '-' }}</td>
+                  <td>{{ application.teacher_email || '-' }}</td>
                 </tr>
                 <tr v-if="studentApplications.length === 0">
-                  <td colspan="6" class="empty-cell">暂无学生申请</td>
+                  <td colspan="9" class="empty-cell">暂无已确认的实习学生</td>
                 </tr>
               </tbody>
             </table>
