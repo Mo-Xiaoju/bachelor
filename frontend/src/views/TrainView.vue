@@ -396,8 +396,36 @@ const reportForm = ref({
   title: '',
   content: '',
   date: new Date().toISOString().split('T')[0],
-  file: null as File | null
+  project_id: '',
+  file: null
 })
+
+// 获取学生已确认的科研项目列表（用于实验报告上传时选择）
+const studentProjects = ref<any[]>([])
+const getStudentProjects = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/research-projects/confirmed'), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      studentProjects.value = result.projects || []
+    }
+  } catch (error) {
+    console.error('获取学生项目列表失败', error)
+  }
+}
+
+// 打开实验报告对话框
+const openReportDialog = async () => {
+  await getStudentProjects()
+  showReportDialog.value = true
+}
 const showReportDialog = ref(false)
 const showReportViewDialog = ref(false)
 const editingReportId = ref(null)
@@ -505,12 +533,18 @@ const submitReport = async () => {
     return
   }
 
+  if (!reportForm.value.project_id) {
+    errorMessage.value = '请选择科研项目'
+    return
+  }
+
   try {
     const token = sessionStorage.getItem('token')
     const formData = new FormData()
     formData.append('title', reportForm.value.title)
     formData.append('content', reportForm.value.content)
     formData.append('date', reportForm.value.date)
+    formData.append('project_id', reportForm.value.project_id)
     if (reportForm.value.file) {
       formData.append('file', reportForm.value.file)
     }
@@ -541,6 +575,7 @@ const submitReport = async () => {
         title: '',
         content: '',
         date: new Date().toISOString().split('T')[0],
+        project_id: '',
         file: null
       }
       isEditing.value = false
@@ -566,6 +601,7 @@ const editReport = (report: any) => {
     title: report.title,
     content: report.content,
     date: report.date,
+    project_id: report.project_id || '',
     file: null
   }
   editingReportId.value = report.id
@@ -1042,7 +1078,7 @@ onMounted(async () => {
 
           <!-- 上传按钮 -->
           <div class="upload-section">
-            <button class="upload-btn" @click="showReportDialog = true">
+            <button class="upload-btn" @click="openReportDialog">
               上传实验报告
             </button>
           </div>
@@ -1110,6 +1146,15 @@ onMounted(async () => {
                   <div class="form-item">
                     <label>日期：</label>
                     <input type="date" v-model="reportForm.date" required />
+                  </div>
+                  <div class="form-item">
+                    <label>科研项目：</label>
+                    <select v-model="reportForm.project_id" required>
+                      <option value="">请选择科研项目</option>
+                      <option v-for="project in studentProjects" :key="project.id" :value="project.id">
+                        {{ project.projectName }}
+                      </option>
+                    </select>
                   </div>
                   <div class="form-item">
                     <label>附件：</label>

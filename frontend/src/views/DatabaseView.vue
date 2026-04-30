@@ -50,6 +50,38 @@ const formatValue = (value: any): string => {
   return String(value)
 }
 
+const deleteRecord = async (row: any) => {
+  // 获取主键
+  const primaryKey = currentColumns.value[0] // 假设第一列是主键
+  const primaryValue = row[primaryKey]
+
+  if (!confirm(`确定要删除ID为 ${primaryValue} 的记录吗？此操作不可撤销！`)) {
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/database/table/${activeTable.value}/delete/${primaryValue}`), {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    const result = await response.json()
+    if (result.success) {
+      alert('删除成功')
+      // 重新加载数据
+      await fetchData()
+      await fetchStats()
+    } else {
+      alert('删除失败: ' + result.message)
+    }
+  } catch (error) {
+    console.error('删除失败', error)
+    alert('删除失败，请稍后重试')
+  }
+}
+
 const fetchData = async () => {
   loading.value = true
   try {
@@ -165,12 +197,16 @@ onMounted(async () => {
             <thead>
               <tr>
                 <th v-for="column in currentColumns" :key="column">{{ column }}</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(row, index) in currentData" :key="index">
                 <td v-for="column in currentColumns" :key="column">
                   {{ formatValue(row[column]) }}
+                </td>
+                <td>
+                  <button class="delete-btn" @click="deleteRecord(row)">删除</button>
                 </td>
               </tr>
             </tbody>
@@ -330,6 +366,21 @@ onMounted(async () => {
 
 .data-table tr:hover {
   background: #fafafa;
+}
+
+.delete-btn {
+  padding: 4px 10px;
+  background: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+.delete-btn:hover {
+  background: #d32f2f;
 }
 
 .pagination {
