@@ -85,6 +85,7 @@ const checkAuth = async () => {
   const token = sessionStorage.getItem('token')
   if (!token) {
     loading.value = false
+    window.location.href = '/login'
     return
   }
 
@@ -99,9 +100,12 @@ const checkAuth = async () => {
     if (result.success) {
       user.value = result.user
       sessionStorage.setItem('user', JSON.stringify(result.user))
+    } else {
+      window.location.href = '/login'
     }
   } catch (error) {
     console.error('获取用户信息失败', error)
+    window.location.href = '/login'
   } finally {
     loading.value = false
   }
@@ -246,7 +250,7 @@ const removeWelfareTag = (index: number) => {
 }
 
 // 学生管理
-const showStudentManagement = ref(false)
+
 const studentApplications = ref<any[]>([])
 
 // 企业描述编辑
@@ -284,12 +288,7 @@ const saveDescription = async () => {
   }
 }
 
-// 打开学生管理页面
-const openStudentManagement = () => {
-  router.push('/company/students')
-}
-
-// 获取学生申请列表
+// 获取学生申请列表（用于实习审核）
 const getStudentApplications = async () => {
   try {
     const token = sessionStorage.getItem('token')
@@ -888,11 +887,9 @@ onUnmounted(() => {
                 >发布实习</a
               >
             </div>
-            <div class="function-item">
+            <div class="function-item" @click="router.push('/company/students')">
               <div class="function-icon">👥</div>
-              <a href="#" class="function-link" @click.prevent="showStudentManagement = true"
-                >学生管理</a
-              >
+              <span class="function-link">学生管理</span>
             </div>
             <div class="function-item">
               <div class="function-icon">📊</div>
@@ -1213,65 +1210,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 学生管理对话框 -->
-    <div v-if="showStudentManagement" class="dialog-overlay">
-      <div class="dialog dialog-large">
-        <div class="dialog-header">
-          <h3>学生管理</h3>
-          <button class="close-btn" @click="showStudentManagement = false">×</button>
-        </div>
-        <div class="dialog-body">
-          <div class="student-list">
-            <table class="student-table">
-              <thead>
-                <tr>
-                  <th>学生姓名</th>
-                  <th>学号</th>
-                  <th>申请岗位</th>
-                  <th>申请时间</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="application in studentApplications" :key="application.id">
-                  <td>{{ application.student_name }}</td>
-                  <td>{{ application.student_id }}</td>
-                  <td>{{ application.position }}</td>
-                  <td>{{ application.apply_time }}</td>
-                  <td>
-                    <span :class="'status-' + application.status">
-                      {{ getStatusText(application.status) }}
-                    </span>
-                  </td>
-                  <td class="operation">
-                    <a
-                      v-if="application.status === 'pending'"
-                      href="#"
-                      @click.prevent="approveApplication(application.id)"
-                      >批准</a
-                    >
-                    <a
-                      v-if="application.status === 'pending'"
-                      href="#"
-                      @click.prevent="rejectApplication(application.id)"
-                      >拒绝</a
-                    >
-                    <a href="#" @click.prevent="viewResume(application.id)">查看简历</a>
-                  </td>
-                </tr>
-                <tr v-if="studentApplications.length === 0">
-                  <td colspan="6" class="empty-cell">暂无学生申请</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="dialog-footer">
-          <button class="cancel-btn" @click="showStudentManagement = false">关闭</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 

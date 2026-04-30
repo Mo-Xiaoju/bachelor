@@ -1,3 +1,71 @@
+<template>
+  <div class="company-student-view">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h1>学生管理</h1>
+      <p class="page-subtitle">已确认的实习生列表</p>
+      <div class="search-bar">
+        <input
+          type="text"
+          v-model="searchKeyword"
+          placeholder="搜索学生姓名、学号或岗位..."
+        />
+        <button class="search-btn">搜索</button>
+      </div>
+    </div>
+
+    <!-- 主要内容 -->
+    <div class="main-content">
+      <!-- 错误消息提示 -->
+      <div v-if="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <!-- 学生列表 -->
+      <div class="student-list-section">
+        <div v-if="loadingStudents" class="loading-container">
+          <p>加载中...</p>
+        </div>
+        <div v-else>
+          <table class="student-table">
+            <thead>
+              <tr>
+                <th>学生姓名</th>
+                <th>学号</th>
+                <th>专业</th>
+                <th>实习岗位</th>
+                <th>学生联系方式</th>
+                <th>双选教师</th>
+                <th>教师联系方式</th>
+                <th>确认时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="student in filteredStudents" :key="student.id">
+                <td>{{ student.student_name }}</td>
+                <td>{{ student.student_id }}</td>
+                <td>{{ student.major || '未设置' }}</td>
+                <td>{{ student.position }}</td>
+                <td>{{ student.student_contact || '未设置' }}</td>
+                <td>{{ student.teacher_name || '未设置' }}</td>
+                <td>{{ student.teacher_contact || '未设置' }}</td>
+                <td>{{ student.confirm_time }}</td>
+                <td class="operation">
+                  <a v-if="student.resume_file" href="#" @click.prevent="viewResume(student.resume_file)">查看简历</a>
+                </td>
+              </tr>
+              <tr v-if="filteredStudents.length === 0">
+                <td colspan="6" class="empty-cell">暂无符合条件的实习生</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -9,6 +77,7 @@ const loading = ref(true)
 const confirmedStudents = ref<any[]>([])
 const loadingStudents = ref(false)
 const errorMessage = ref('')
+const searchKeyword = ref('')
 
 // 从 sessionStorage 获取用户信息
 const getStoredUser = (): any => {
@@ -17,7 +86,6 @@ const getStoredUser = (): any => {
 }
 
 const checkAuth = async () => {
-  // 首先尝试从 sessionStorage 读取
   const storedUser = getStoredUser()
   if (storedUser) {
     user.value = storedUser
@@ -25,7 +93,6 @@ const checkAuth = async () => {
     return
   }
 
-  // 如果没有，尝试从后端验证
   const token = sessionStorage.getItem('token')
   if (!token) {
     loading.value = false
@@ -78,6 +145,17 @@ const getConfirmedStudents = async () => {
   }
 }
 
+// 搜索过滤后的学生列表
+const filteredStudents = computed(() => {
+  if (!searchKeyword.value) return confirmedStudents.value
+  const keyword = searchKeyword.value.toLowerCase()
+  return confirmedStudents.value.filter(s =>
+    s.student_name.toLowerCase().includes(keyword) ||
+    s.student_id.toLowerCase().includes(keyword) ||
+    s.position.toLowerCase().includes(keyword)
+  )
+})
+
 // 查看简历
 const viewResume = async (resumeFile: string) => {
   try {
@@ -109,69 +187,13 @@ const viewResume = async (resumeFile: string) => {
 
 onMounted(async () => {
   await checkAuth()
-  // 检查用户角色，确保只有企业用户访问
   if (user.value?.role !== 'company') {
     router.push('/')
     return
   }
-  // 获取已确认的实习生列表
   await getConfirmedStudents()
 })
 </script>
-
-<template>
-  <div class="company-student-view">
-    <!-- 页面头部 -->
-    <div class="page-header">
-      <h1>学生管理</h1>
-      <p class="page-subtitle">已确认的实习生列表</p>
-    </div>
-
-    <!-- 主要内容 -->
-    <div class="main-content">
-      <!-- 错误消息提示 -->
-      <div v-if="errorMessage" class="error-message">
-        {{ errorMessage }}
-      </div>
-
-      <!-- 学生列表 -->
-      <div class="student-list-section">
-        <div v-if="loadingStudents" class="loading-container">
-          <p>加载中...</p>
-        </div>
-        <div v-else>
-          <table class="student-table">
-            <thead>
-              <tr>
-                <th>学生姓名</th>
-                <th>学号</th>
-                <th>专业</th>
-                <th>实习岗位</th>
-                <th>确认时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="student in confirmedStudents" :key="student.id">
-                <td>{{ student.student_name }}</td>
-                <td>{{ student.student_id }}</td>
-                <td>{{ student.major || '未设置' }}</td>
-                <td>{{ student.position }}</td>
-                <td>{{ student.confirm_time }}</td>
-                <td class="operation">
-                  <a v-if="student.resume_file" href="#" @click.prevent="viewResume(student.resume_file)">查看简历</a>
-                </td>
-              </tr>
-              <tr v-if="confirmedStudents.length === 0">
-                <td colspan="6" class="empty-cell">暂无已确认的实习生</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
 
 <style scoped>
 .company-student-view {
@@ -183,7 +205,7 @@ onMounted(async () => {
   padding: 0;
   margin: 0;
   box-sizing: border-box;
-  margin-top: 60px; /* 为上方导航栏留出空间 */
+  margin-top: 60px;
   position: relative;
   left: 0;
   right: 0;
@@ -199,12 +221,50 @@ onMounted(async () => {
   flex: 0 0 auto;
 }
 
+.search-bar {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 10px 15px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.3s ease;
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.search-btn {
+  padding: 10px 25px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.search-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
 .page-header h1 {
   color: #2c3e50;
   font-size: 28px;
   font-weight: 700;
   margin: 0;
-  transition: color 0.3s ease;
 }
 
 .page-subtitle {
@@ -212,7 +272,6 @@ onMounted(async () => {
   font-size: 16px;
   margin: 10px 0 0 0;
   font-weight: 500;
-  transition: all 0.3s ease;
 }
 
 .main-content {
