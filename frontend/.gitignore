@@ -25,6 +25,16 @@ coverage
 *.sln
 *.sw?
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
 *.tsbuildinfo
 
 .eslintcache
