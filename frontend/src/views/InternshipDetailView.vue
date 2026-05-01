@@ -65,8 +65,14 @@ const viewCompanyJobs = () => {
 
 // 加载百度地图
 const loadBaiduMap = () => {
-  // 百度地图AK
-  const BAIDU_MAP_AK = '65Di4aWq8hr10t7szdW7Se4wLh7dDZKM'
+  // 从环境变量获取百度地图AK
+  const BAIDU_MAP_AK = import.meta.env.VITE_BAIDU_MAP_AK || ''
+
+  if (!BAIDU_MAP_AK) {
+    console.error('错误：未配置百度地图AK')
+    console.error('请在 .env 文件中添加 VITE_BAIDU_MAP_AK=你的AK')
+    return
+  }
 
   // 检查地图容器是否存在
   const mapContainer = document.getElementById('baiduMap')
@@ -82,40 +88,28 @@ const loadBaiduMap = () => {
     return
   }
 
-  // 动态加载百度地图SDK（使用WebGL版本）
   console.log('开始加载百度地图SDK...')
   console.log('AK:', BAIDU_MAP_AK)
   console.log('当前页面URL:', window.location.href)
-  
-  const script = document.createElement('script')
-  script.type = 'text/javascript'
-  // 使用WebGL版本（v1.0）
-  script.src = `https://api.map.baidu.com/api?type=webgl&v=1.0&ak=${BAIDU_MAP_AK}`
-  
-  script.onload = () => {
-    console.log('百度地图SDK脚本加载成功')
-    console.log('等待BMapGL对象初始化...')
-    
-    // 轮询检查BMapGL对象
-    const checkReady = () => {
-      if (window.BMapGL) {
-        console.log('✓ BMapGL对象已就绪')
-        initMapGL()
-      } else if (window.BMap) {
-        console.log('✓ BMap对象已就绪')
-        initMap()
-      } else {
-        console.log('等待中...')
-        setTimeout(checkReady, 200)
-      }
-    }
-    
-    // 开始检查
-    setTimeout(checkReady, 300)
+
+  // 使用JSONP方式加载百度地图API
+  // 定义回调函数
+  window.bmapCallback = () => {
+    console.log('✓ BMap对象已就绪，开始初始化地图')
+    initMap()
   }
 
-  script.onerror = (error) => {
-    console.error('百度地图SDK脚本加载失败:', error)
+  const script = document.createElement('script')
+  script.type = 'text/javascript'
+  // 使用callback参数指定回调函数
+  script.src = `https://api.map.baidu.com/api?v=3.0&ak=${BAIDU_MAP_AK}&callback=bmapCallback`
+
+  script.onerror = () => {
+    console.error('百度地图SDK脚本加载失败')
+    console.error('请检查：')
+    console.error('1. AK是否正确')
+    console.error('2. 网络连接是否正常')
+    console.error('3. Referer白名单是否设置为 *')
   }
 
   document.head.appendChild(script)
@@ -156,8 +150,16 @@ const initMap = () => {
     console.log('地图初始化成功，开始地址解析...')
 
     // 地址解析
+    console.log('开始地址解析，地址:', address)
+    console.log('城市:', internship.value.city)
+
     const geocoder = new window.BMap.Geocoder()
-    geocoder.getPoint(address, (point: any) => {
+
+    // 使用城市+地址组合进行解析，提高准确率
+    const fullAddress = internship.value.city + address
+    console.log('完整地址:', fullAddress)
+
+    geocoder.getPoint(fullAddress, (point: any) => {
       if (point) {
         console.log('地址解析成功:', point)
         map.centerAndZoom(point, 16)
@@ -183,9 +185,39 @@ const initMap = () => {
           map.openInfoWindow(infoWindow, point)
         }, 500)
       } else {
-        console.error('地址解析失败:', address)
+        console.error('地址解析失败，尝试仅使用城市名...')
+        // 如果完整地址解析失败，尝试仅使用城市名
+        geocoder.getPoint(internship.value.city, (cityPoint: any) => {
+          if (cityPoint) {
+            console.log('城市定位成功:', cityPoint)
+            map.centerAndZoom(cityPoint, 12)
+
+            // 添加标记
+            const marker = new window.BMap.Marker(cityPoint)
+            map.addOverlay(marker)
+
+            // 添加信息窗口
+            const infoWindow = new window.BMap.InfoWindow(
+              `<div style="padding: 10px;">
+                <h4 style="margin: 0 0 8px 0;">${internship.value.companyName}</h4>
+                <p style="margin: 0; color: #666;">${address}</p>
+                <p style="margin: 5px 0 0 0; color: #999; font-size: 12px;">（仅定位到城市级别）</p>
+              </div>`
+            )
+
+            marker.addEventListener('click', () => {
+              map.openInfoWindow(infoWindow, cityPoint)
+            })
+
+            setTimeout(() => {
+              map.openInfoWindow(infoWindow, cityPoint)
+            }, 500)
+          } else {
+            console.error('城市定位也失败:', internship.value.city)
+          }
+        })
       }
-    }, { city: internship.value.city })
+    })
 
     mapLoaded.value = true
   } catch (error) {

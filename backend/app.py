@@ -4881,9 +4881,6 @@ with app.app_context():
             realname='李老师',
             role='teacher',
             major='计算机科学',
-            min_quota=1,
-            max_quota=5,
-            current_quota=0,
             first_login=True
         )
         db.session.add(teacher)
@@ -4906,9 +4903,6 @@ with app.app_context():
                 realname=t_data['realname'],
                 role='teacher',
                 major=t_data['major'],
-                min_quota=1,
-                max_quota=5,
-                current_quota=0,
                 first_login=True
             )
             db.session.add(teacher)
