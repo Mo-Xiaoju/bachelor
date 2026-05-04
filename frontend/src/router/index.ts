@@ -20,13 +20,13 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
-      meta: { title: '登录 - 毕业设计管理系统' },
+      meta: { title: '登录 - 教学管理辅助系统' },
     },
     {
       path: '/change-password',
       name: 'change-password',
       component: () => import('../views/ChangePasswordView.vue'),
-      meta: { title: '修改密码 - 毕业设计管理系统' },
+      meta: { title: '修改密码 - 教学管理辅助系统' },
     },
     {
       path: '/register',
