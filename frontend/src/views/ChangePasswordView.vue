@@ -92,7 +92,7 @@ const handleSubmit = async (e: Event) => {
       },
       credentials: 'include',
       body: JSON.stringify({
-        newPassword: form.newPassword
+        new_password: form.newPassword
       })
     })
 
@@ -120,7 +120,7 @@ const handleSubmit = async (e: Event) => {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
- 
+
   padding: 20px;
   box-sizing: border-box;
 }

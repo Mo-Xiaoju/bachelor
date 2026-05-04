@@ -7,6 +7,7 @@ const router = useRouter()
 const route = useRoute()
 const user = ref<any>(null)
 const loading = ref(true)
+const unreadNotificationCount = ref(0)
 
 // 获取存储的 token
 const getToken = (): string | null => {
@@ -59,6 +60,9 @@ const checkAuth = async () => {
 
 
       sessionStorage.setItem('user', JSON.stringify(result.user))
+
+      // 获取未读通知数量
+      getUnreadNotificationCount()
     } else {
 
       // Token 无效，清除存储
@@ -71,6 +75,25 @@ const checkAuth = async () => {
     user.value = null
   } finally {
     loading.value = false
+  }
+}
+
+const getUnreadNotificationCount = async () => {
+  try {
+    const token = getToken()
+    if (!token) return
+
+    const response = await fetch(buildURL('/api/notifications/unread-count'), {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    const result = await response.json()
+    if (result.success) {
+      unreadNotificationCount.value = result.count
+    }
+  } catch (error) {
+    console.error('获取未读通知数量失败', error)
   }
 }
 
@@ -107,6 +130,8 @@ const logout = async () => {
 // 组件挂载时检查
 onMounted(() => {
   checkAuth()
+  // 每30秒刷新一次未读通知数量
+  setInterval(getUnreadNotificationCount, 30000)
 })
 
 // 监听路由变化，每次切换页面时重新检查登录状态
@@ -134,7 +159,12 @@ watch(() => route.path, () => {
 
 
         <div v-if="user" class="user-info">
-          <RouterLink to="/profile" class="user-name">{{ user.realname }} ({{ user.username }})</RouterLink>
+          <RouterLink to="/profile" class="user-name">
+            {{ user.realname }} ({{ user.username }})
+            <span v-if="unreadNotificationCount > 0" class="notification-badge">
+              {{ unreadNotificationCount > 99 ? '99+' : unreadNotificationCount }}
+            </span>
+          </RouterLink>
 
         </div>
       </div>
@@ -207,6 +237,25 @@ watch(() => route.path, () => {
   font-size: 14px;
   color: #333;
   white-space: nowrap;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.notification-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ff4444;
+  color: white;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 5px;
+  line-height: 1;
 }
 
 .logout-btn {
