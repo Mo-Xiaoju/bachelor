@@ -37,9 +37,38 @@ const statusOptions = [
 
 const menuItems = ref([
   { name: '个人信息', path: 'profile' },
-  { name: '我的信息', path: 'my-info' },
+  { name: '我的申请', path: 'my-info' },
+  { name: '通知中心', path: 'notifications' },
   { name: '修改密码', path: 'change-password' }
 ])
+
+// 通知相关
+const notifications = ref<any[]>([])
+const loadingNotifications = ref(false)
+const unreadCount = ref(0)
+const unreadApplicationCount = ref(0)
+
+// 通知分页相关
+const notificationPage = ref(1)
+const notificationPageSize = ref(10)
+const notificationTotalPages = ref(1)
+
+// 通知筛选相关
+const notificationKeyword = ref('')
+const selectedNotificationTypes = ref<string[]>([])
+const selectedReadStatus = ref('')
+
+const notificationTypeOptions = [
+  { value: 'exam_assignment', label: '考务安排' },
+  { value: 'application_log', label: '申请通知' },
+  { value: 'announcement', label: '公告通知' }
+]
+
+const readStatusOptions = [
+  { value: '', label: '全部' },
+  { value: 'false', label: '未读' },
+  { value: 'true', label: '已读' }
+]
 
 const editForm = ref({
   contact: '',
@@ -88,9 +117,17 @@ const checkAuth = async () => {
 const handleMenuClick = (item: any) => {
   activeMenu.value = item.name
   console.log('点击菜单:', item.name, '路径:', item.path)
-  if (item.name === '我的信息') {
+  if (item.name === '我的申请') {
     getApplicationLogs()
   }
+  if (item.name === '通知中心') {
+    getNotifications()
+  }
+}
+
+const refreshUnreadCounts = () => {
+  getUnreadApplicationCount()
+  getNotifications()
 }
 
 const getApplicationLogs = async (page: number = 1) => {
@@ -231,6 +268,153 @@ const saveContactInfo = async () => {
   }
 }
 
+const getNotifications = async (page: number = 1) => {
+  loadingNotifications.value = true
+  notificationPage.value = page
+  try {
+    const token = sessionStorage.getItem('token')
+    console.log('正在获取通知列表...')
+
+    const params = new URLSearchParams()
+    params.append('page', page.toString())
+    params.append('page_size', notificationPageSize.value.toString())
+
+    if (notificationKeyword.value) {
+      params.append('keyword', notificationKeyword.value)
+    }
+
+    if (selectedNotificationTypes.value.length > 0) {
+      params.append('types', selectedNotificationTypes.value.join(','))
+    }
+
+    if (selectedReadStatus.value) {
+      params.append('is_read', selectedReadStatus.value)
+    }
+
+    const response = await fetch(buildURL('/api/notifications?' + params.toString()), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    console.log('响应状态:', response.status)
+    const result = await response.json()
+    console.log('响应结果:', result)
+    if (result.success) {
+      notifications.value = result.notifications
+      unreadCount.value = result.unread_count
+      notificationTotalPages.value = result.total_pages || 1
+      console.log('通知获取成功，共', notifications.value.length, '条')
+    } else {
+      console.error('获取通知失败:', result.message)
+    }
+  } catch (error) {
+    console.error('获取通知失败', error)
+  } finally {
+    loadingNotifications.value = false
+  }
+}
+
+const toggleNotificationTypeFilter = (type: string) => {
+  const index = selectedNotificationTypes.value.indexOf(type)
+  if (index > -1) {
+    selectedNotificationTypes.value.splice(index, 1)
+  } else {
+    selectedNotificationTypes.value.push(type)
+  }
+  getNotifications(1)
+}
+
+const handleNotificationSearch = () => {
+  getNotifications(1)
+}
+
+const clearNotificationFilters = () => {
+  notificationKeyword.value = ''
+  selectedNotificationTypes.value = []
+  selectedReadStatus.value = ''
+  getNotifications(1)
+}
+
+const getUnreadApplicationCount = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/user/application-logs?statuses=pending'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      unreadApplicationCount.value = result.total || 0
+    }
+  } catch (error) {
+    console.error('获取未读申请数量失败', error)
+  }
+}
+
+const markAsRead = async (notificationId: number) => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/notifications/${notificationId}/read`), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      const notification = notifications.value.find(n => n.id === notificationId)
+      if (notification) {
+        notification.is_read = true
+        unreadCount.value = Math.max(0, unreadCount.value - 1)
+      }
+    }
+  } catch (error) {
+    console.error('标记已读失败', error)
+  }
+}
+
+const markAllAsRead = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/notifications/read-all'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      notifications.value.forEach(n => n.is_read = true)
+      unreadCount.value = 0
+    }
+  } catch (error) {
+    console.error('标记全部已读失败', error)
+  }
+}
+
+const getNotificationTypeLabel = (type: string) => {
+  const labels: Record<string, string> = {
+    'exam_assignment': '考务安排',
+    'application_log': '申请通知',
+    'announcement': '公告通知'
+  }
+  return labels[type] || '系统通知'
+}
+
+const getNotificationTypeClass = (type: string) => {
+  const classes: Record<string, string> = {
+    'exam_assignment': 'type-exam',
+    'application_log': 'type-application',
+    'announcement': 'type-announcement'
+  }
+  return classes[type] || 'type-default'
+}
+
 const changePassword = async () => {
   passwordError.value = ''
   passwordSuccess.value = ''
@@ -289,6 +473,9 @@ const changePassword = async () => {
 
 onMounted(() => {
   checkAuth()
+  refreshUnreadCounts()
+  // 每30秒刷新一次未读数量
+  setInterval(refreshUnreadCounts, 30000)
 })
 </script>
 
@@ -397,6 +584,22 @@ onMounted(() => {
 .menu-text {
   font-size: 14px;
   font-weight: 500;
+}
+
+.menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ff4444;
+  color: white;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: auto;
+  line-height: 1;
 }
 
 /* 右侧：内容区域 */
@@ -832,6 +1035,15 @@ onMounted(() => {
   border-color: #ccc;
 }
 
+.status-select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
 /* 翻页样式 */
 .pagination {
   display: flex;
@@ -911,6 +1123,156 @@ onMounted(() => {
   font-size: 14px;
 }
 
+/* 通知中心样式 */
+.notifications-content {
+  animation: fadeIn 0.5s ease;
+}
+
+.notifications-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+}
+
+.notifications-header h3 {
+  color: #2c3e50;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.mark-all-btn {
+  padding: 8px 16px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.mark-all-btn:hover {
+  background: #5a6fd6;
+  transform: translateY(-1px);
+}
+
+.notifications-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-height: 600px;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.notifications-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notifications-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.notifications-list::-webkit-scrollbar-thumb {
+  background: #667eea;
+  border-radius: 3px;
+}
+
+.notifications-list::-webkit-scrollbar-thumb:hover {
+  background: #5a6fd6;
+}
+
+.notification-item {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  border-left: 4px solid #ddd;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.notification-item:hover {
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transform: translateX(5px);
+}
+
+.notification-item.unread {
+  border-left-color: #667eea;
+  background: #f8f9ff;
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: none;
+}
+
+.notification-type {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.type-exam {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.type-application {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.type-announcement {
+  background: #e8f5e9;
+  color: #388e3c;
+}
+
+.type-default {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.notification-time {
+  font-size: 12px;
+  color: #999;
+}
+
+.notification-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.notification-content {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.6;
+}
+
+.unread-badge {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  padding: 4px 10px;
+  background: #ff4444;
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
 </style>
 
 <template>
@@ -937,6 +1299,12 @@ onMounted(() => {
               @click="handleMenuClick(item)"
             >
               <span class="menu-text">{{ item.name }}</span>
+              <span v-if="item.name === '我的申请' && unreadApplicationCount > 0" class="menu-badge">
+                {{ unreadApplicationCount > 99 ? '99+' : unreadApplicationCount }}
+              </span>
+              <span v-if="item.name === '通知中心' && unreadCount > 0" class="menu-badge">
+                {{ unreadCount > 99 ? '99+' : unreadCount }}
+              </span>
             </div>
           </div>
         </div>
@@ -983,7 +1351,7 @@ onMounted(() => {
           </div>
 
           <!-- 我的信息 -->
-          <div v-if="activeMenu === '我的信息'" class="my-info-content">
+          <div v-if="activeMenu === '我的申请'" class="my-info-content">
             <div class="info-card">
               <h3>申请日志</h3>
 
@@ -1076,6 +1444,104 @@ onMounted(() => {
                   class="page-btn"
                   :disabled="currentPage === totalPages"
                   @click="getApplicationLogs(currentPage + 1)"
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 通知中心 -->
+          <div v-if="activeMenu === '通知中心'" class="notifications-content">
+            <div class="info-card">
+              <div class="notifications-header">
+                <h3>通知中心</h3>
+                <button v-if="unreadCount > 0" class="mark-all-btn" @click="markAllAsRead">
+                  全部标记为已读
+                </button>
+              </div>
+
+              <!-- 搜索和筛选区域 -->
+              <div class="filter-section">
+                <div class="search-box">
+                  <input
+                    type="text"
+                    v-model="notificationKeyword"
+                    placeholder="搜索通知..."
+                    @keyup.enter="handleNotificationSearch"
+                  />
+                  <button class="search-btn" @click="handleNotificationSearch">搜索</button>
+                </div>
+
+                <div class="filter-group">
+                  <span class="filter-label">通知类型：</span>
+                  <label
+                    v-for="option in notificationTypeOptions"
+                    :key="option.value"
+                    class="filter-checkbox"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="option.value"
+                      :checked="selectedNotificationTypes.includes(option.value)"
+                      @change="toggleNotificationTypeFilter(option.value)"
+                    />
+                    {{ option.label }}
+                  </label>
+                </div>
+
+                <div class="filter-group">
+                  <span class="filter-label">阅读状态：</span>
+                  <select v-model="selectedReadStatus" @change="getNotifications(1)" class="status-select">
+                    <option v-for="option in readStatusOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </div>
+
+                <button class="clear-btn" @click="clearNotificationFilters">清除筛选</button>
+              </div>
+
+              <div v-if="loadingNotifications" class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>加载中...</p>
+              </div>
+
+              <div v-else-if="notifications.length === 0" class="empty-state">
+                暂无通知
+              </div>
+
+              <div v-else class="notifications-list">
+                <div v-for="notification in notifications" :key="notification.id"
+                     class="notification-item"
+                     :class="{ 'unread': !notification.is_read }"
+                     @click="markAsRead(notification.id)">
+                  <div class="notification-header">
+                    <span class="notification-type" :class="getNotificationTypeClass(notification.type)">
+                      {{ getNotificationTypeLabel(notification.type) }}
+                    </span>
+                    <span class="notification-time">{{ new Date(notification.created_at).toLocaleString('zh-CN') }}</span>
+                  </div>
+                  <div class="notification-title">{{ notification.title }}</div>
+                  <div class="notification-content">{{ notification.content }}</div>
+                  <div v-if="!notification.is_read" class="unread-badge">未读</div>
+                </div>
+              </div>
+
+              <!-- 翻页区域 -->
+              <div v-if="notificationTotalPages > 1" class="pagination">
+                <button
+                  class="page-btn"
+                  :disabled="notificationPage === 1"
+                  @click="getNotifications(notificationPage - 1)"
+                >
+                  上一页
+                </button>
+                <span class="page-info">第 {{ notificationPage }} / {{ notificationTotalPages }} 页</span>
+                <button
+                  class="page-btn"
+                  :disabled="notificationPage === notificationTotalPages"
+                  @click="getNotifications(notificationPage + 1)"
                 >
                   下一页
                 </button>

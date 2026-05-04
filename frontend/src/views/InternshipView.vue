@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { buildURL } from '../utils/api'
 
 const router = useRouter()
+const route = useRoute()
 const user = ref<any>(null)
 const loading = ref(false)
 const successMessage = ref('')
@@ -75,28 +76,42 @@ const internshipApplications = ref<any[]>([])
 // 搜索关键词
 const searchKeyword = ref('')
 
+// 收藏功能
+const showFavoritesOnly = ref(false)
+const favoriteInternshipIds = ref<Set<number>>(new Set())
+
 // 过滤后的实习列表
 const filteredInternships = computed(() => {
-  if (!searchKeyword.value) {
-    return internships.value
+  let result = internships.value
+
+  // 搜索过滤
+  if (searchKeyword.value) {
+    const keyword = searchKeyword.value.toLowerCase()
+    result = result.filter(item => {
+      return (
+        (item.company && item.company.toLowerCase().includes(keyword)) ||
+        (item.position && item.position.toLowerCase().includes(keyword)) ||
+        (item.city && item.city.toLowerCase().includes(keyword)) ||
+        (item.location && item.location.toLowerCase().includes(keyword)) ||
+        (item.skillTags && item.skillTags.some((tag: string) => tag.toLowerCase().includes(keyword))) ||
+        (item.welfareTags && item.welfareTags.some((tag: string) => tag.toLowerCase().includes(keyword)))
+      )
+    })
   }
-  const keyword = searchKeyword.value.toLowerCase()
-  return internships.value.filter(item => {
-    return (
-      item.company.toLowerCase().includes(keyword) ||
-      item.position.toLowerCase().includes(keyword) ||
-      item.city.toLowerCase().includes(keyword) ||
-      item.location.toLowerCase().includes(keyword) ||
-      (item.skillTags && item.skillTags.some(tag => tag.toLowerCase().includes(keyword))) ||
-      (item.welfareTags && item.welfareTags.some(tag => tag.toLowerCase().includes(keyword)))
-    )
-  })
+
+  // 收藏过滤
+  if (showFavoritesOnly.value && isStudent.value) {
+    result = result.filter(item => favoriteInternshipIds.value.has(item.id))
+  }
+
+  return result
 })
 
 // 获取实习招聘列表
 const getInternships = async () => {
   try {
     const token = sessionStorage.getItem('token')
+
     const response = await fetch(buildURL('/api/internship/list'), {
       method: 'GET',
       headers: {
@@ -105,10 +120,19 @@ const getInternships = async () => {
       credentials: 'include',
     })
 
+
     const result = await response.json()
+
+
     if (result.success) {
       internships.value = result.internships
+
+      // 如果是学生用户，加载收藏状态
+      if (isStudent.value) {
+        getStudentFavorites()
+      }
     } else {
+      
       errorMessage.value = result.message || '获取实习列表失败'
     }
   } catch (error) {
@@ -290,6 +314,71 @@ const resumeFile = ref<File | null>(null)
 // 跳转到实习详情页
 const goToDetail = (id: number) => {
   router.push(`/internship/detail/${id}`)
+}
+
+// 收藏/取消收藏实习
+const toggleFavorite = async (id: number) => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const isFavorited = favoriteInternshipIds.value.has(id)
+
+    const response = await fetch(buildURL(`/api/student/favorite/${id}`), {
+      method: isFavorited ? 'DELETE' : 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      if (isFavorited) {
+        favoriteInternshipIds.value.delete(id)
+        successMessage.value = '已取消收藏'
+      } else {
+        favoriteInternshipIds.value.add(id)
+        successMessage.value = '收藏成功'
+      }
+      // 更新实习列表中的收藏状态
+      const internship = internships.value.find(item => item.id === id)
+      if (internship) {
+        internship.isFavorited = !isFavorited
+      }
+      setTimeout(() => {
+        successMessage.value = ''
+      }, 2000)
+    } else {
+      errorMessage.value = result.message || '操作失败'
+    }
+  } catch (error) {
+    console.error('收藏操作失败', error)
+    errorMessage.value = '操作失败，请稍后重试'
+  }
+}
+
+// 获取学生收藏的实习列表
+const getStudentFavorites = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/student/favorites'), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      favoriteInternshipIds.value = new Set(result.favorites.map((id: number) => id))
+      // 更新实习列表中的收藏状态
+      internships.value.forEach(item => {
+        item.isFavorited = favoriteInternshipIds.value.has(item.id)
+      })
+    }
+  } catch (error) {
+    console.error('获取收藏列表失败', error)
+  }
 }
 
 // 检查学生是否已有确认的实习记录
@@ -594,7 +683,7 @@ const editLog = (log) => {
   showLogDialog.value = true
 }
 
-// 分页相关
+// 实习申请分页相关
 const currentPage = ref(1)
 const itemsPerPage = ref(1)
 const totalPages = computed(() => {
@@ -606,6 +695,27 @@ const currentApplication = computed(() => {
   const startIndex = (currentPage.value - 1) * itemsPerPage.value
   return internshipApplications.value[startIndex]
 })
+
+// 实习列表分页相关
+const internshipListPage = ref(1)
+const internshipItemsPerPage = ref(9)
+const internshipTotalPages = computed(() => {
+  return Math.ceil(filteredInternships.value.length / internshipItemsPerPage.value)
+})
+
+// 当前页的实习列表
+const currentInternships = computed(() => {
+  const startIndex = (internshipListPage.value - 1) * internshipItemsPerPage.value
+  const endIndex = startIndex + internshipItemsPerPage.value
+  return filteredInternships.value.slice(startIndex, endIndex)
+})
+
+// 实习列表翻页
+const goToInternshipPage = (page: number) => {
+  if (page >= 1 && page <= internshipTotalPages.value) {
+    internshipListPage.value = page
+  }
+}
 
 // Word文档内容预览
 const wordContent = ref('')
@@ -748,6 +858,13 @@ const deleteCompany = (id: number) => {
 
 onMounted(async () => {
   await getUserInfo()
+
+  // 检查路由参数，设置默认标签栏
+  const tab = route.query.tab as string
+  if (tab) {
+    activeMenu.value = tab
+  }
+
   startCarousel()
   getInternships()
   // 如果是学生，获取实习申请列表
@@ -849,61 +966,82 @@ onMounted(async () => {
                 🔍
               </button>
             </div>
+            <div class="filter-options" v-if="isStudent">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="showFavoritesOnly" />
+                <span class="checkbox-text">仅显示已收藏</span>
+              </label>
+            </div>
             <div class="search-result-count">
               共找到 {{ filteredInternships.length }} 条实习信息
             </div>
           </div>
           <div class="registration-list">
-            <table class="internship-table">
-              <thead>
-              <tr>
-                <th>实习单位</th>
-                <th>实习岗位</th>
-                <th>城市</th>
-                <th>具体地点</th>
-                <th>薪资</th>
-                <th>招聘人数</th>
-                <th>已报名人数</th>
-                <th>截止日期</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="internship in filteredInternships" :key="internship.id">
-                <td>{{ internship.company }}</td>
-                <td>
-                  <div>{{ internship.position }}</div>
-                  <div class="tags">
-                    <span v-for="(tag, index) in internship.skillTags" :key="index" class="tag skill-tag">
-                      {{ tag }}
-                    </span>
+            <div class="internship-card-grid">
+              <div v-for="internship in currentInternships" :key="internship.id" class="internship-card">
+                <div class="card-header">
+                  <div class="card-title-row">
+                    <h3 class="card-title">{{ internship.position }}</h3>
+                    <div class="card-header-actions">
+                      <button v-if="isStudent" class="favorite-btn" :class="{ favorited: internship.isFavorited }" @click.stop="toggleFavorite(internship.id)" :title="internship.isFavorited ? '取消收藏' : '收藏'">
+                        {{ internship.isFavorited ? '★' : '☆' }}
+                      </button>
+                      <span v-if="internship.status === 'active'" class="status-badge status-active">招聘中</span>
+                      <span v-else-if="internship.status === 'closed'" class="status-badge status-closed">已关闭</span>
+                    </div>
                   </div>
-                  <div class="tags">
-                    <span v-for="(tag, index) in internship.welfareTags" :key="index" class="tag welfare-tag">
-                      {{ tag }}
-                    </span>
+                </div>
+                <div class="card-content">
+                  <div class="info-tags">
+                    <span class="info-tag">{{ internship.city }}</span>
+                    <span class="info-tag">{{ internship.experienceRequirement || '经验不限' }}</span>
+                    <span class="info-tag">{{ internship.educationRequirement || '学历不限' }}</span>
+                    <span v-if="internship.salary" class="info-tag salary-tag">{{ internship.salary }}</span>
                   </div>
-                </td>
-                <td>{{ internship.city }}</td>
-                <td>{{ internship.location }}</td>
-                <td>{{ internship.salary || '面议' }}</td>
-                <td>{{ internship.quota }}</td>
-                <td>{{ internship.registeredCount }}</td>
-                <td>{{ internship.deadline }}</td>
-                <td class="operation">
-                  <div class="operation-buttons">
-                    <a v-if="!internship.registered && isStudent" href="#" @click.prevent="applyInternship(internship.id)" class="apply-link">报名</a>
-                    <span v-else-if="isCompany" class="registered-badge">企业用户</span>
-                    <span v-else-if="internship.registered" class="registered-badge">已报名</span>
-                    <a href="#" @click.prevent="goToDetail(internship.id)" class="detail-link">查看详情</a>
+                </div>
+                <div class="card-footer">
+                  <div class="company-info">
+                    <div class="company-logo">{{ internship.company.charAt(0) }}</div>
+                    <div class="company-details">
+                      <div class="company-name">{{ internship.company }}</div>
+                      <div class="company-meta">
+                        <span v-if="internship.companyField">{{ internship.companyField }}</span>
+                        <span v-if="internship.companyScale"> · {{ internship.companyScale }}</span>
+                      </div>
+                    </div>
                   </div>
-                </td>
-              </tr>
-            </tbody>
-            </table>
+                  <div class="card-actions">
+                    <a v-if="!internship.registered && isStudent" href="#" @click.prevent="applyInternship(internship.id)" class="card-btn apply-btn">报名</a>
+                    <span v-else-if="isCompany" class="card-badge">企业用户</span>
+                    <span v-else-if="internship.registered" class="card-badge registered-badge">已报名</span>
+                    <a href="#" @click.prevent="goToDetail(internship.id)" class="card-btn detail-btn">查看详情</a>
+                  </div>
+                </div>
+              </div>
+            </div>
             <!-- 无搜索结果提示 -->
             <div v-if="filteredInternships.length === 0" class="empty-state">
               <p>暂无匹配的实习信息</p>
+            </div>
+            <!-- 分页控件 -->
+            <div v-if="internshipTotalPages.value > 1" class="pagination">
+              <button
+                class="pagination-btn"
+                :disabled="internshipListPage.value === 1"
+                @click="goToInternshipPage(internshipListPage.value - 1)"
+              >
+                上一页
+              </button>
+              <span class="pagination-info">
+                第 {{ internshipListPage.value }} / {{ internshipTotalPages.value }} 页
+              </span>
+              <button
+                class="pagination-btn"
+                :disabled="internshipListPage.value === internshipTotalPages.value"
+                @click="goToInternshipPage(internshipListPage.value + 1)"
+              >
+                下一页
+              </button>
             </div>
           </div>
         </div>
@@ -1435,221 +1573,6 @@ onMounted(async () => {
   border-bottom: 1px solid #ebeef5;
 }
 
-/* 表格样式 */
-.internship-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 20px;
-  table-layout: fixed; /* 固定表格布局 */
-  min-width: 1000px;
-}
-
-.internship-table th,
-.internship-table td {
-  padding: 15px;
-  text-align: left;
-  border-bottom: 1px solid #e6e6e6;
-  vertical-align: top;
-  white-space: normal;
-  word-wrap: break-word;
-  height: 100%;
-}
-
-/* 固定列宽设置 */
-.internship-table th:nth-child(1),
-.internship-table td:nth-child(1) {
-  width: 150px; /* 实习单位 */
-  min-width: 150px;
-  max-width: 150px;
-}
-
-.internship-table th:nth-child(2),
-.internship-table td:nth-child(2) {
-  width: 300px; /* 实习岗位 + 标签 */
-  min-width: 300px;
-  max-width: 300px;
-}
-
-.internship-table th:nth-child(3),
-.internship-table td:nth-child(3) {
-  width: 80px; /* 城市 */
-  min-width: 80px;
-  max-width: 80px;
-}
-
-.internship-table th:nth-child(4),
-.internship-table td:nth-child(4) {
-  width: 150px; /* 具体地点 */
-  min-width: 150px;
-  max-width: 150px;
-}
-
-.internship-table th:nth-child(5),
-.internship-table td:nth-child(5) {
-  width: 100px; /* 薪资 */
-  min-width: 100px;
-  max-width: 100px;
-}
-
-.internship-table th:nth-child(6),
-.internship-table td:nth-child(6) {
-  width: 80px; /* 招聘人数 */
-  min-width: 80px;
-  max-width: 80px;
-}
-
-.internship-table th:nth-child(7),
-.internship-table td:nth-child(7) {
-  width: 100px; /* 已报名人数 */
-  min-width: 100px;
-  max-width: 100px;
-}
-
-.internship-table th:nth-child(8),
-.internship-table td:nth-child(8) {
-  width: 120px; /* 截止日期 */
-  min-width: 120px;
-  max-width: 120px;
-}
-
-.internship-table th:nth-child(9),
-.internship-table td:nth-child(9) {
-  width: 80px; /* 操作 */
-  min-width: 80px;
-  max-width: 80px;
-  white-space: nowrap;
-  vertical-align: bottom; /* 底部对齐 */
-}
-
-/* 审核表格列宽 */
-.internship-table th:nth-child(1),
-.internship-table td:nth-child(1) {
-  width: 80px; /* 申请ID */
-  min-width: 80px;
-  max-width: 80px;
-}
-
-.internship-table th:nth-child(2),
-.internship-table td:nth-child(2) {
-  width: 120px; /* 学生姓名 */
-  min-width: 120px;
-  max-width: 120px;
-}
-
-.internship-table th:nth-child(3),
-.internship-table td:nth-child(3) {
-  width: 120px; /* 学生学号 */
-  min-width: 120px;
-  max-width: 120px;
-}
-
-.internship-table th:nth-child(4),
-.internship-table td:nth-child(4) {
-  width: 180px; /* 实习岗位 */
-  min-width: 180px;
-  max-width: 180px;
-}
-
-.internship-table th:nth-child(5),
-.internship-table td:nth-child(5) {
-  width: 150px; /* 申请时间 */
-  min-width: 150px;
-  max-width: 150px;
-}
-
-.internship-table th:nth-child(6),
-.internship-table td:nth-child(6) {
-  width: 100px; /* 状态 */
-  min-width: 100px;
-  max-width: 100px;
-}
-
-.internship-table th:nth-child(7),
-.internship-table td:nth-child(7) {
-  width: 120px; /* 操作 */
-  min-width: 120px;
-  max-width: 120px;
-}
-
-.internship-table th {
-  background-color: #f5f7fa;
-  font-weight: 600;
-  color: #333;
-  font-size: 14px;
-}
-
-.internship-table tbody tr {
-  height: 120px; /* 固定行高，确保每条记录等宽 */
-  min-height: 120px;
-  max-height: 120px;
-}
-
-.internship-table tbody tr:hover {
-  background-color: #f5f7fa;
-}
-
-.operation {
-  display: flex;
-  flex-direction: row;
-  gap: 10px;
-  align-items: flex-start;
-  justify-content: flex-start;
-  height: 100%;
-  padding: 15px;
-  flex-wrap: nowrap;
-}
-
-.operation-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.log-file a {
-  color: #409eff;
-  text-decoration: none;
-}
-
-.log-file a:hover {
-  text-decoration: underline;
-}
-
-.log-actions {
-  margin-top: 15px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.edit-btn {
-  padding: 6px 12px;
-  background-color: #409eff;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  transition: background-color 0.3s;
-}
-
-.edit-btn:hover {
-  background-color: #66b1ff;
-}
-
-.log-tip {
-  margin-top: 20px;
-  padding: 10px;
-  background-color: #f0f9eb;
-  border: 1px solid #e1f5c4;
-  border-radius: 4px;
-  color: #67c23a;
-  font-size: 14px;
-}
-
-.registered-badge {
-  color: #909399;
-  font-size: 13px;
-}
-
 /* 搜索区域样式 */
 .search-section {
   display: flex;
@@ -1657,6 +1580,33 @@ onMounted(async () => {
   gap: 20px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+}
+
+/* 筛选选项 */
+.filter-options {
+  display: flex;
+  align-items: center;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #606266;
+  user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #409eff;
+}
+
+.checkbox-text {
+  font-weight: 500;
 }
 
 .search-box {
@@ -1698,82 +1648,6 @@ onMounted(async () => {
 .search-result-count {
   font-size: 14px;
   color: #666;
-}
-
-/* 操作链接样式 */
-.operation-buttons a,
-.operation-buttons span {
-  text-decoration: none;
-  font-size: 13px;
-  padding: 5px 10px;
-  border-radius: 4px;
-  transition: all 0.3s;
-  display: inline-block;
-  text-align: center;
-}
-
-.detail-link {
-  color: #409eff;
-  background: #ecf5ff;
-}
-
-.detail-link:hover {
-  background: #dbeafe;
-}
-
-.apply-link {
-  color: #67c23a;
-  background: #f0f9eb;
-}
-
-.apply-link:hover {
-  background: #dcfce7;
-}
-
-/* 卡片列表 */
-.internship-card-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
-  margin-top: 20px;
-}
-
-.internship-card {
-  padding: 20px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  border-left: 4px solid #409eff;
-}
-
-.internship-card h4 {
-  margin: 0 0 15px 0;
-  color: #333;
-}
-
-.internship-card p {
-  margin: 8px 0;
-  font-size: 14px;
-  color: #666;
-}
-
-.status-confirmed {
-  color: #67c23a;
-  font-weight: bold;
-}
-
-.status-pending {
-  color: #e6a23c;
-  font-weight: bold;
-}
-
-.status-rejected {
-  color: #f56c6c;
-  font-weight: bold;
-}
-
-.status-completed {
-  color: #409eff;
-  font-weight: bold;
 }
 
 /* 表单样式 */
@@ -2545,5 +2419,368 @@ onMounted(async () => {
 
 .reject-btn:hover {
   background-color: #da190b;
+}
+
+/* 实习卡片网格布局 */
+.internship-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* 实习卡片样式 */
+.internship-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border: 1px solid #f0f0f0;
+}
+
+.internship-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* 卡片头部 */
+.card-header {
+  margin-bottom: 16px;
+}
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 收藏按钮 */
+.favorite-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #c0c4cc;
+  padding: 0;
+  transition: all 0.3s;
+  line-height: 1;
+}
+
+.favorite-btn:hover {
+  transform: scale(1.2);
+}
+
+.favorite-btn.favorited {
+  color: #ffd700;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+  flex: 1;
+  line-height: 1.4;
+}
+
+/* 状态标签 */
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-active {
+  background: #f0f9ff;
+  color: #0066cc;
+  border: 1px solid #cce5ff;
+}
+
+.status-closed {
+  background: #fef0f0;
+  color: #f56c6c;
+  border: 1px solid #fbc4c4;
+}
+
+/* 卡片内容 */
+.card-content {
+  margin-bottom: 20px;
+}
+
+.info-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.info-tag {
+  padding: 6px 12px;
+  background: #f5f7fa;
+  color: #606266;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.salary-tag {
+  background: #fff7e6;
+  color: #fa8c16;
+  font-weight: 500;
+}
+
+/* 卡片底部 */
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.company-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.company-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.company-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.company-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-meta {
+  font-size: 13px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 卡片操作按钮 */
+.card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.card-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.apply-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.apply-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.detail-btn {
+  background: #f5f7fa;
+  color: #409eff;
+}
+
+.detail-btn:hover {
+  background: #ecf5ff;
+}
+
+.card-badge {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: #909399;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+  .internship-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card-footer {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .company-info {
+    width: 100%;
+  }
+
+  .card-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .card-btn {
+    flex: 1;
+    text-align: center;
+  }
+}
+
+
+/* 我的实习卡片网格 */
+.internship-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* 我的实习卡片 */
+.internship-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border: 1px solid #f0f0f0;
+}
+
+.internship-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* 我的实习卡片标题 */
+.internship-card h4 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* 我的实习卡片内容 */
+.internship-card p {
+  margin: 10px 0;
+  font-size: 14px;
+  color: #606266;
+  display: flex;
+  justify-content: space-between;
+}
+
+.internship-card p strong {
+  color: #909399;
+  font-weight: 400;
+}
+
+/* 状态标签 */
+.internship-card .status-pending {
+  background: #fff7e6;
+  color: #fa8c16;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.internship-card .status-approved {
+  background: #f6ffed;
+  color: #52c41a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.internship-card .status-rejected {
+  background: #fff2f0;
+  color: #ff4d4f;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.internship-card .status-confirmed {
+  background: #f0f9ff;
+  color: #1890ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.internship-card .status-completed {
+  background: #f5f7fa;
+  color: #606266;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* 确认实习按钮 */
+.internship-card .card-actions {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.internship-card .primary-btn {
+  width: 100%;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.internship-card .primary-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* 我的实习响应式适配 */
+@media (max-width: 768px) {
+  .internship-card-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

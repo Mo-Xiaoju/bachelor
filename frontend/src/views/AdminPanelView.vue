@@ -12,7 +12,7 @@ const errorMessage = ref('')
 const user = ref<any>(null)
 const selectedStartTime = ref('')
 const selectedEndTime = ref('')
-const activeTab = ref('double-selection') // 双选管理/校内用户注册/科研训练管理/团队管理
+const activeTab = ref('double-selection') // 双选管理/校内用户注册/科研训练管理/团队管理/考务管理
 const pendingProjects = ref<any[]>([])
 const loadingProjects = ref(false)
 const showProjectDetail = ref(false)
@@ -25,6 +25,25 @@ const reviewComment = ref('')
 const pendingTeams = ref<any[]>([])
 const loadingTeams = ref(false)
 const teamReviewComment = ref('')
+// 考务管理相关
+const exams = ref<any[]>([])
+const loadingExams = ref(false)
+const showExamForm = ref(false)
+const editingExam = ref<any>(null)
+const showAssignDialog = ref(false)
+const selectedExam = ref<any>(null)
+const teachers = ref<any[]>([])
+const loadingExamTeachers = ref(false)
+const selectedTeacherId = ref('')
+
+const examForm = ref({
+  exam_name: '',
+  exam_date: '',
+  start_time: '',
+  end_time: '',
+  location: '',
+  description: ''
+})
 const getToken = (): string | null => {
   const token = sessionStorage.getItem('token')
   console.log('Navbar - 获取 Token:', token ? '存在' : '不存在')
@@ -363,6 +382,9 @@ const switchTab = (tab: string) => {
   }
   if (tab === 'team-management') {
     fetchPendingTeams()
+  }
+  if (tab === 'exam-management') {
+    getExams()
   }
 }
 
@@ -1197,6 +1219,194 @@ const closeProjectDetail = () => {
   selectedProject.value = null
 }
 
+// 考务管理相关方法
+const getExams = async () => {
+  loadingExams.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/exam-arrangements'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      exams.value = result.exams
+    }
+  } catch (error) {
+    console.error('获取考务安排失败', error)
+    errorMessage.value = '获取考务安排失败'
+  } finally {
+    loadingExams.value = false
+  }
+}
+
+const getTeachers = async () => {
+  loadingExamTeachers.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/teachers/list'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      teachers.value = result.teachers
+    }
+  } catch (error) {
+    console.error('获取教师列表失败', error)
+  } finally {
+    loadingExamTeachers.value = false
+  }
+}
+
+const openExamForm = (exam?: any) => {
+  if (exam) {
+    editingExam.value = exam
+    examForm.value = {
+      exam_name: exam.exam_name,
+      exam_date: exam.exam_date,
+      start_time: exam.start_time,
+      end_time: exam.end_time,
+      location: exam.location,
+      description: exam.description || ''
+    }
+  } else {
+    editingExam.value = null
+    examForm.value = {
+      exam_name: '',
+      exam_date: '',
+      start_time: '',
+      end_time: '',
+      location: '',
+      description: ''
+    }
+  }
+  showExamForm.value = true
+}
+
+const submitExamForm = async () => {
+  try {
+    const token = sessionStorage.getItem('token')
+    const url = editingExam.value
+      ? `/api/exam-arrangements/${editingExam.value.id}`
+      : '/api/exam-arrangements'
+    const method = editingExam.value ? 'PUT' : 'POST'
+
+    const response = await fetch(buildURL(url), {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify(examForm.value)
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      showExamForm.value = false
+      getExams()
+    } else {
+      errorMessage.value = result.message || '操作失败'
+    }
+  } catch (error) {
+    console.error('提交考务表单失败', error)
+    errorMessage.value = '操作失败'
+  }
+}
+
+const deleteExam = async (examId: number) => {
+  if (!confirm('确定要删除这个考务安排吗？')) return
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/exam-arrangements/${examId}`), {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      getExams()
+    } else {
+      errorMessage.value = result.message || '删除失败'
+    }
+  } catch (error) {
+    console.error('删除考务安排失败', error)
+    errorMessage.value = '删除失败'
+  }
+}
+
+const openAssignDialog = (exam: any) => {
+  selectedExam.value = exam
+  selectedTeacherId.value = ''
+  getTeachers()
+  showAssignDialog.value = true
+}
+
+const assignInvigilator = async () => {
+  if (!selectedTeacherId.value) {
+    errorMessage.value = '请选择教师'
+    return
+  }
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/exam-arrangements/${selectedExam.value.id}/invigilators`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify({ teacher_id: parseInt(selectedTeacherId.value) })
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      showAssignDialog.value = false
+      getExams()
+    } else {
+      errorMessage.value = result.message || '分配失败'
+    }
+  } catch (error) {
+    console.error('分配监考教师失败', error)
+    errorMessage.value = '分配失败'
+  }
+}
+
+const removeInvigilator = async (examId: number, teacherId: number) => {
+  if (!confirm('确定要移除该监考教师吗？')) return
+
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL(`/api/exam-arrangements/${examId}/invigilators/${teacherId}`), {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    if (result.success) {
+      getExams()
+    } else {
+      errorMessage.value = result.message || '移除失败'
+    }
+  } catch (error) {
+    console.error('移除监考教师失败', error)
+    errorMessage.value = '移除失败'
+  }
+}
+
 // 阶段选项
 const stepOptions = [
   { value: 0, label: '未开始', description: '双选准备阶段' },
@@ -1868,6 +2078,14 @@ onMounted(async () => {
           >
             <span class="menu-icon">👥</span>
             <span class="menu-text">团队管理</span>
+          </div>
+          <div
+            class="menu-item"
+            :class="{ active: activeTab === 'exam-management' }"
+            @click="switchTab('exam-management')"
+          >
+            <span class="menu-icon">📝</span>
+            <span class="menu-text">考务管理</span>
           </div>
         </div>
       </div>
@@ -2589,6 +2807,71 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- 考务管理 -->
+        <div v-if="activeTab === 'exam-management'" class="tab-content">
+          <div class="admin-section">
+            <div class="exam-header">
+              <h2>考务管理</h2>
+              <button class="add-btn" @click="openExamForm()">
+                + 新增考务安排
+              </button>
+            </div>
+
+            <div v-if="loadingExams" class="loading">加载中...</div>
+            <div v-else-if="exams.length === 0" class="empty-state">
+              暂无考务安排
+            </div>
+            <div v-else class="exam-list">
+              <div v-for="exam in exams" :key="exam.id" class="exam-card">
+                <div class="exam-info">
+                  <h3>{{ exam.exam_name }}</h3>
+                  <div class="exam-details">
+                    <div class="detail-item">
+                      <span class="label">📅 日期：</span>
+                      <span>{{ exam.exam_date }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="label">⏰ 时间：</span>
+                      <span>{{ exam.start_time }} - {{ exam.end_time }}</span>
+                    </div>
+                    <div class="detail-item">
+                      <span class="label">📍 地点：</span>
+                      <span>{{ exam.location }}</span>
+                    </div>
+                    <div v-if="exam.description" class="detail-item">
+                      <span class="label">📝 说明：</span>
+                      <span>{{ exam.description }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="invigilators-section">
+                  <h4>监考教师</h4>
+                  <div v-if="exam.invigilators.length === 0" class="no-invigilators">
+                    暂无监考教师
+                  </div>
+                  <div v-else class="invigilator-list">
+                    <div v-for="inv in exam.invigilators" :key="inv.id" class="invigilator-item">
+                      <span>{{ inv.realname }} ({{ inv.username }})</span>
+                      <button class="remove-btn" @click="removeInvigilator(exam.id, inv.id)">
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                  <button class="assign-btn" @click="openAssignDialog(exam)">
+                    + 分配监考教师
+                  </button>
+                </div>
+
+                <div class="exam-actions">
+                  <button class="edit-btn" @click="openExamForm(exam)">编辑</button>
+                  <button class="delete-btn" @click="deleteExam(exam.id)">删除</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="activeTab === 'announcement'" class="tab-content">
           <div class="admin-section">
             <div class="announcement-header">
@@ -2848,6 +3131,73 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 考务表单对话框 -->
+    <div v-if="showExamForm" class="dialog-overlay" @click.self="showExamForm = false">
+      <div class="dialog">
+        <div class="dialog-header">
+          <h3>{{ editingExam ? '编辑考务安排' : '新增考务安排' }}</h3>
+          <button class="close-btn" @click="showExamForm = false">×</button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-group">
+            <label>考试名称 *</label>
+            <input v-model="examForm.exam_name" type="text" placeholder="请输入考试名称" />
+          </div>
+          <div class="form-group">
+            <label>考试日期 *</label>
+            <input v-model="examForm.exam_date" type="date" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>开始时间 *</label>
+              <input v-model="examForm.start_time" type="time" />
+            </div>
+            <div class="form-group">
+              <label>结束时间 *</label>
+              <input v-model="examForm.end_time" type="time" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>考试地点 *</label>
+            <input v-model="examForm.location" type="text" placeholder="请输入考试地点" />
+          </div>
+          <div class="form-group">
+            <label>考试说明</label>
+            <textarea v-model="examForm.description" rows="3" placeholder="请输入考试说明"></textarea>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="cancel-btn" @click="showExamForm = false">取消</button>
+          <button class="submit-btn" @click="submitExamForm">提交</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分配监考教师对话框 -->
+    <div v-if="showAssignDialog" class="dialog-overlay" @click.self="showAssignDialog = false">
+      <div class="dialog">
+        <div class="dialog-header">
+          <h3>分配监考教师 - {{ selectedExam?.exam_name }}</h3>
+          <button class="close-btn" @click="showAssignDialog = false">×</button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-group">
+            <label>选择教师</label>
+            <select v-model="selectedTeacherId">
+              <option value="">请选择教师</option>
+              <option v-for="teacher in teachers" :key="teacher.id" :value="teacher.id">
+                {{ teacher.realname }} ({{ teacher.username }}) - {{ teacher.department }}
+              </option>
+            </select>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="cancel-btn" @click="showAssignDialog = false">取消</button>
+          <button class="submit-btn" @click="assignInvigilator">分配</button>
         </div>
       </div>
     </div>
@@ -5010,5 +5360,327 @@ reset-list {
 .dialog-actions button:last-child {
   background-color: #4CAF50;
   color: white;
+}
+
+/* 考务管理样式 */
+.exam-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.exam-header h2 {
+  margin: 0;
+}
+
+.add-btn {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.add-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.exam-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.exam-card {
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e8ecf0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.exam-info h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0 0 12px 0;
+}
+
+.exam-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-item {
+  font-size: 14px;
+  color: #34495e;
+}
+
+.detail-item .label {
+  font-weight: 600;
+  color: #667eea;
+}
+
+.invigilators-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e8ecf0;
+}
+
+.invigilators-section h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0 0 12px 0;
+}
+
+.no-invigilators {
+  color: #999;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.invigilator-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.invigilator-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8f9fc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.remove-btn {
+  padding: 4px 12px;
+  background: #ee5a5a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s ease;
+}
+
+.remove-btn:hover {
+  background: #ff6b6b;
+  transform: translateY(-1px);
+}
+
+.assign-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.assign-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(64, 192, 87, 0.3);
+}
+
+.exam-actions {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e8ecf0;
+  display: flex;
+  gap: 12px;
+}
+
+.edit-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #ffd43b 0%, #fab005 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.edit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(250, 176, 5, 0.3);
+}
+
+.delete-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.delete-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(238, 90, 90, 0.3);
+}
+
+/* 对话框样式 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e8ecf0;
+}
+
+.dialog-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+}
+
+.close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f2f2f2;
+  border-radius: 50%;
+  font-size: 20px;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+  background: #e8ecf0;
+  color: #333;
+}
+
+.dialog-body {
+  padding: 24px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #34495e;
+  margin-bottom: 8px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e0e6ed;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group textarea {
+  resize: vertical;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid #e8ecf0;
+}
+
+.cancel-btn {
+  padding: 10px 20px;
+  background: #f2f2f2;
+  color: #34495e;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+  background: #e8ecf0;
+}
+
+.submit-btn {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 </style>

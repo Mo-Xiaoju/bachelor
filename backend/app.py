@@ -239,6 +239,22 @@ class InternshipApplication(db.Model):
     student = db.relationship('User', backref=db.backref('internship_applications', lazy='dynamic'))
     internship = db.relationship('Internship', backref=db.backref('applications', lazy='dynamic'))
 
+# 实习收藏表
+class InternshipFavorite(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    internship_id = db.Column(db.Integer, db.ForeignKey('internship.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # 关系
+    student = db.relationship('User', backref=db.backref('internship_favorites', lazy='dynamic'))
+    internship = db.relationship('Internship', backref=db.backref('favorited_by', lazy='dynamic'))
+    
+    # 唯一约束：每个学生只能收藏同一个实习一次
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'internship_id', name='_student_internship_favorite_uc'),
+    )
+
 # 导师双选记录模型
 class TeacherSelection(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -384,6 +400,22 @@ class ApplicationLog(db.Model):
     handler = db.relationship('User', foreign_keys=[handler_id])
 
 
+# 通知模型
+class Notification(db.Model):
+    __tablename__ = 'notification'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 接收用户ID
+    type = db.Column(db.String(50), nullable=False)  # 通知类型：exam_assignment/application_log/announcement等
+    title = db.Column(db.String(255), nullable=False)  # 通知标题
+    content = db.Column(db.Text, nullable=True)  # 通知内容
+    is_read = db.Column(db.Boolean, default=False)  # 是否已读
+    related_id = db.Column(db.Integer, nullable=True)  # 关联对象ID
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间
+    
+    # 关联
+    user = db.relationship('User', foreign_keys=[user_id], backref='notifications')
+
+
 
 
 # 公告阅读记录模型
@@ -395,6 +427,40 @@ class AnnouncementReadRecord(db.Model):
     
     # 唯一约束，确保每个用户对每个公告只有一条阅读记录
     __table_args__ = (db.UniqueConstraint('user_id', 'announcement_id', name='_user_announcement_uc'),)
+
+
+# 考务安排表
+class ExamArrangement(db.Model):
+    __tablename__ = 'exam_arrangement'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    exam_name = db.Column(db.String(255), nullable=False)  # 考试名称
+    exam_date = db.Column(db.Date, nullable=False)  # 考试日期
+    start_time = db.Column(db.Time, nullable=False)  # 开始时间
+    end_time = db.Column(db.Time, nullable=False)  # 结束时间
+    location = db.Column(db.String(255), nullable=False)  # 考试地点
+    description = db.Column(db.Text, nullable=True)  # 考试说明
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 创建者（管理员）
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # 关系
+    creator = db.relationship('User', backref=db.backref('created_exams', lazy='dynamic'))
+    invigilators = db.relationship('ExamInvigilator', backref='exam', lazy='dynamic', cascade='all, delete-orphan')
+
+
+# 监考安排表
+class ExamInvigilator(db.Model):
+    __tablename__ = 'exam_invigilator'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    exam_id = db.Column(db.Integer, db.ForeignKey('exam_arrangement.id'), nullable=False)  # 关联考试
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 监考教师
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # 关系
+    teacher = db.relationship('User', backref=db.backref('invigilator_tasks', lazy='dynamic'))
+    
+    __table_args__ = (
+        db.UniqueConstraint('exam_id', 'teacher_id', name='_exam_teacher_uc'),
+    )
 
 # JWT Token 工具函数
 def generate_token(user_id, username, role):
@@ -988,6 +1054,17 @@ def process_application():
         application.status = 'approved' if action == 'approve' else 'rejected'
         application.updated_at = datetime.now()
         
+        # 创建通知
+        notification = Notification(
+            user_id=application.user_id,
+            type='application_log',
+            title='实习申请通知',
+            content=f'您的实习申请已{"批准" if action == "approve" else "拒绝"}',
+            is_read=False,
+            related_id=application.id
+        )
+        db.session.add(notification)
+        
         db.session.commit()
         
         return jsonify({'success': True, 'message': '处理成功'})
@@ -1178,6 +1255,87 @@ def check_has_confirmed_internship():
     except Exception as e:
         print(f"检查实习记录失败: {str(e)}")
         return jsonify({'success': False, 'message': '检查失败', 'has_confirmed': False})
+
+# 学生收藏实习
+@app.route('/api/student/favorite/<int:internship_id>', methods=['POST'])
+@login_required
+def favorite_internship(internship_id):
+    """学生收藏实习"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        # 检查实习是否存在
+        internship = Internship.query.get(internship_id)
+        if not internship:
+            return jsonify({'success': False, 'message': '实习不存在'}), 404
+        
+        # 检查是否已收藏
+        existing = InternshipFavorite.query.filter_by(
+            student_id=user_id,
+            internship_id=internship_id
+        ).first()
+        
+        if existing:
+            return jsonify({'success': False, 'message': '已收藏该实习'})
+        
+        # 创建收藏记录
+        favorite = InternshipFavorite(
+            student_id=user_id,
+            internship_id=internship_id
+        )
+        db.session.add(favorite)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '收藏成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"收藏实习失败: {str(e)}")
+        return jsonify({'success': False, 'message': '收藏失败'}), 500
+
+# 学生取消收藏实习
+@app.route('/api/student/favorite/<int:internship_id>', methods=['DELETE'])
+@login_required
+def unfavorite_internship(internship_id):
+    """学生取消收藏实习"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        # 查找收藏记录
+        favorite = InternshipFavorite.query.filter_by(
+            student_id=user_id,
+            internship_id=internship_id
+        ).first()
+        
+        if not favorite:
+            return jsonify({'success': False, 'message': '未收藏该实习'}), 404
+        
+        db.session.delete(favorite)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '取消收藏成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"取消收藏失败: {str(e)}")
+        return jsonify({'success': False, 'message': '取消收藏失败'}), 500
+
+# 学生获取收藏的实习列表
+@app.route('/api/student/favorites', methods=['GET'])
+@login_required
+def get_student_favorites():
+    """学生获取收藏的实习列表"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        # 获取学生的所有收藏
+        favorites = InternshipFavorite.query.filter_by(student_id=user_id).all()
+        
+        # 返回收藏的实习ID列表
+        favorite_ids = [fav.internship_id for fav in favorites]
+        
+        return jsonify({'success': True, 'favorites': favorite_ids})
+    except Exception as e:
+        print(f"获取收藏列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': '获取收藏列表失败'}), 500
 
 # 学生获取自己的实习申请列表
 @app.route('/api/student/applications', methods=['GET'])
@@ -1925,6 +2083,17 @@ def approve_team():
             log.handler_name = user.realname
             log.receipt = message
         
+        # 创建通知
+        notification = Notification(
+            user_id=team.initiator_id,
+            type='application_log',
+            title='团队申请通知',
+            content=f'您的团队"{team.theme}"申请已批准',
+            is_read=False,
+            related_id=team.id
+        )
+        db.session.add(notification)
+        
         db.session.commit()
         
         return jsonify({'success': True, 'message': message})
@@ -1994,6 +2163,17 @@ def reject_team():
             log.handler_id = user.id
             log.handler_name = user.realname
             log.receipt = message
+        
+        # 创建通知
+        notification = Notification(
+            user_id=team.initiator_id,
+            type='application_log',
+            title='团队申请通知',
+            content=f'您的团队"{team.theme}"申请已被拒绝',
+            is_read=False,
+            related_id=team.id
+        )
+        db.session.add(notification)
         
         db.session.commit()
         
@@ -2719,6 +2899,125 @@ def change_password():
 def logout():
     session.clear()
     return jsonify({'success': True, 'message': '登出成功'})
+
+# 通知相关API
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def get_notifications():
+    """获取用户通知列表（支持分页和筛选）"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        # 获取分页参数
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 10, type=int)
+        
+        # 获取筛选参数
+        keyword = request.args.get('keyword', '')
+        types = request.args.get('types', '').split(',') if request.args.get('types') else []
+        is_read = request.args.get('is_read')  # 'true', 'false', or None
+        
+        # 获取未读数量
+        unread_count = Notification.query.filter_by(user_id=user_id, is_read=False).count()
+        
+        # 构建查询
+        query = Notification.query.filter_by(user_id=user_id)
+        
+        # 类型筛选
+        if types and types != ['']:
+            query = query.filter(Notification.type.in_(types))
+        
+        # 已读/未读筛选
+        if is_read == 'true':
+            query = query.filter_by(is_read=True)
+        elif is_read == 'false':
+            query = query.filter_by(is_read=False)
+        
+        # 关键词搜索
+        if keyword:
+            query = query.filter(
+                (Notification.title.like(f'%{keyword}%')) |
+                (Notification.content.like(f'%{keyword}%'))
+            )
+        
+        # 排序
+        query = query.order_by(Notification.created_at.desc())
+        
+        # 分页
+        total = query.count()
+        total_pages = (total + page_size - 1) // page_size
+        notifications = query.offset((page - 1) * page_size).limit(page_size).all()
+        
+        result = [{
+            'id': n.id,
+            'type': n.type,
+            'title': n.title,
+            'content': n.content,
+            'is_read': n.is_read,
+            'related_id': n.related_id,
+            'created_at': n.created_at.isoformat()
+        } for n in notifications]
+        
+        return jsonify({
+            'success': True,
+            'notifications': result,
+            'unread_count': unread_count,
+            'total': total,
+            'total_pages': total_pages,
+            'page': page,
+            'page_size': page_size
+        })
+    except Exception as e:
+        print(f"获取通知失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['POST'])
+@login_required
+def mark_notification_read(notification_id):
+    """标记通知为已读"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        notification = Notification.query.filter_by(id=notification_id, user_id=user_id).first()
+        if not notification:
+            return jsonify({'success': False, 'message': '通知不存在'}), 404
+        
+        notification.is_read = True
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '已标记为已读'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"标记已读失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'标记失败: {str(e)}'}), 500
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@login_required
+def mark_all_notifications_read():
+    """标记所有通知为已读"""
+    try:
+        user_id = request.current_user['user_id']
+        
+        Notification.query.filter_by(user_id=user_id, is_read=False).update({'is_read': True})
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '已全部标记为已读'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"标记全部已读失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'标记失败: {str(e)}'}), 500
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def get_unread_count():
+    """获取未读通知数量"""
+    try:
+        user_id = request.current_user['user_id']
+        count = Notification.query.filter_by(user_id=user_id, is_read=False).count()
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        print(f"获取未读数量失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
 
 # 检查登录状态API (JWT 版本)
 @app.route('/api/check-auth', methods=['GET'])
@@ -4661,6 +4960,18 @@ def approve_research_project():
         
         # 更新状态为已批准
         project.status = 'approved'
+        
+        # 创建通知
+        notification = Notification(
+            user_id=project.teacher_id,
+            type='application_log',
+            title='科研训练项目通知',
+            content=f'您的项目"{project.title}"已批准',
+            is_read=False,
+            related_id=project.id
+        )
+        db.session.add(notification)
+        
         db.session.commit()
         
         return jsonify({
@@ -4698,6 +5009,18 @@ def reject_research_project():
         
         # 更新状态为已拒绝
         project.status = 'rejected'
+        
+        # 创建通知
+        notification = Notification(
+            user_id=project.teacher_id,
+            type='application_log',
+            title='科研训练项目通知',
+            content=f'您的项目"{project.title}"已被拒绝',
+            is_read=False,
+            related_id=project.id
+        )
+        db.session.add(notification)
+        
         db.session.commit()
         
         return jsonify({
@@ -4798,43 +5121,161 @@ def get_internship_list():
         # 获取所有激活状态的实习
         internships = Internship.query.filter_by(status='active').all()
         
+        print(f"找到 {len(internships)} 个激活状态的实习")
+        
         # 构建响应数据
         internship_list = []
         for internship in internships:
-            # 计算已报名人数
-            registered_count = InternshipApplication.query.filter_by(
-                internship_id=internship.id
-            ).count()
-            
-            # 检查当前用户是否已报名
-            user_id = request.current_user['user_id']
-            has_applied = InternshipApplication.query.filter_by(
-                student_id=user_id,
-                internship_id=internship.id
-            ).first() is not None
-            
-            internship_list.append({
-                'id': internship.id,
-                'company': internship.company.company_name,
-                'position': internship.position,
-                'city': internship.city,
-                'location': internship.location,
-                'salary': internship.salary or '',
-                'skillTags': internship.skill_tags.split(',') if internship.skill_tags else [],
-                'welfareTags': internship.welfare_tags.split(',') if internship.welfare_tags else [],
-                'quota': internship.quota,
-                'registeredCount': registered_count,
-                'deadline': internship.deadline.strftime('%Y-%m-%d'),
-                'registered': has_applied,
-                'title': internship.title,
-                'description': internship.description,
-                'requirements': internship.requirements
-            })
+            try:
+                # 计算已报名人数
+                registered_count = InternshipApplication.query.filter_by(
+                    internship_id=internship.id
+                ).count()
+                
+                # 检查当前用户是否已报名
+                user_id = request.current_user['user_id']
+                has_applied = InternshipApplication.query.filter_by(
+                    student_id=user_id,
+                    internship_id=internship.id
+                ).first() is not None
+                
+                # 检查当前用户是否已收藏（仅学生用户）
+                is_favorited = False
+                if request.current_user.get('role') == 'student':
+                    is_favorited = InternshipFavorite.query.filter_by(
+                        student_id=user_id,
+                        internship_id=internship.id
+                    ).first() is not None
+                
+                internship_list.append({
+                    'id': internship.id,
+                    'company': internship.company.company_name if internship.company else '未知企业',
+                    'position': internship.position,
+                    'city': internship.city,
+                    'location': internship.location,
+                    'salary': internship.salary or '',
+                    'skillTags': internship.skill_tags.split(',') if internship.skill_tags else [],
+                    'welfareTags': internship.welfare_tags.split(',') if internship.welfare_tags else [],
+                    'quota': internship.quota,
+                    'registeredCount': registered_count,
+                    'deadline': internship.deadline.strftime('%Y-%m-%d') if internship.deadline else '',
+                    'registered': has_applied,
+                    'isFavorited': is_favorited,
+                    'title': internship.title,
+                    'description': internship.description,
+                    'requirements': internship.requirements,
+                    'experienceRequirement': internship.experience_requirement or '',
+                    'educationRequirement': internship.education_requirement or '',
+                    'companyField': internship.company.field if internship.company else '',
+                    'companyScale': internship.company.scale if internship.company else ''
+                })
+            except Exception as e:
+                print(f"处理实习 {internship.id} 时出错: {str(e)}")
+                continue
         
+        print(f"返回 {len(internship_list)} 个实习")
         return jsonify({'success': True, 'internships': internship_list})
     except Exception as e:
         print(f"获取实习列表失败: {str(e)}")
-        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'})
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+# 获取企业数据统计
+@app.route('/api/company/statistics', methods=['GET'])
+@login_required
+def get_company_statistics():
+    """获取企业数据统计"""
+    try:
+        user_id = request.current_user['user_id']
+        company = Company.query.filter_by(user_id=user_id).first()
+        if not company:
+            return jsonify({'success': False, 'message': '企业不存在'}), 404
+        
+        internships = Internship.query.filter_by(company_id=company.id).all()
+        internship_ids = [i.id for i in internships]
+        
+        total_applicants = db.session.query(InternshipApplication.student_id).filter(
+            InternshipApplication.internship_id.in_(internship_ids)
+        ).distinct().count() if internship_ids else 0
+        
+        total_resumes = InternshipApplication.query.filter(
+            InternshipApplication.internship_id.in_(internship_ids)
+        ).count() if internship_ids else 0
+        
+        avg_applications = round(total_resumes / total_applicants, 2) if total_applicants > 0 else 0
+        
+        duplicate_rate = 0
+        if total_resumes > 0:
+            duplicate_rate = round((total_resumes - total_applicants) / total_resumes * 100, 2)
+        
+        total_favorites = InternshipFavorite.query.filter(
+            InternshipFavorite.internship_id.in_(internship_ids)
+        ).count() if internship_ids else 0
+        
+        major_stats = []
+        if internship_ids:
+            majors = db.session.query(User.major, db.func.count(db.distinct(InternshipApplication.student_id))).join(
+                InternshipApplication, User.id == InternshipApplication.student_id
+            ).filter(
+                InternshipApplication.internship_id.in_(internship_ids)
+            ).group_by(User.major).all()
+            
+            total = sum(count for _, count in majors)
+            major_stats = [
+                {'major': major or '未设置', 'count': count, 'percentage': round(count / total * 100, 1) if total > 0 else 0}
+                for major, count in majors
+            ]
+        
+        department_stats = []
+        if internship_ids:
+            departments = db.session.query(User.department, db.func.count(db.distinct(InternshipApplication.student_id))).join(
+                InternshipApplication, User.id == InternshipApplication.student_id
+            ).filter(
+                InternshipApplication.internship_id.in_(internship_ids)
+            ).group_by(User.department).all()
+            
+            total = sum(count for _, count in departments)
+            department_stats = [
+                {'department': department or '未设置', 'count': count, 'percentage': round(count / total * 100, 1) if total > 0 else 0}
+                for department, count in departments
+            ]
+        
+        internship_stats = []
+        max_apps = 1
+        for internship in internships:
+            apps = InternshipApplication.query.filter_by(internship_id=internship.id).count()
+            favorites = InternshipFavorite.query.filter_by(internship_id=internship.id).count()
+            if apps > max_apps:
+                max_apps = apps
+            internship_stats.append({
+                'position': internship.position,
+                'applications': apps,
+                'favorites': favorites,
+                'percentage': 0
+            })
+        
+        for stat in internship_stats:
+            stat['percentage'] = round(stat['applications'] / max_apps * 100, 1) if max_apps > 0 else 0
+        
+        return jsonify({
+            'success': True,
+            'statistics': {
+                'totalApplicants': total_applicants,
+                'totalResumes': total_resumes,
+                'avgApplicationsPerStudent': avg_applications,
+                'duplicateApplicationRate': duplicate_rate,
+                'totalFavorites': total_favorites,
+                'majorDistribution': major_stats,
+                'departmentDistribution': department_stats,
+                'internshipStats': internship_stats
+            }
+        })
+    except Exception as e:
+        print(f"获取企业数据统计失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
 
 # 初始化数据库
 with app.app_context():
@@ -5356,5 +5797,256 @@ def delete_table_record(table_name, record_id):
         db.session.rollback()
         print(f"删除记录失败: {str(e)}")
         return jsonify({'success': False, 'message': f'删除失败: {str(e)}'})
+
+
+# ==================== 考务管理 API ====================
+
+# 获取所有考务安排（管理员/教师可见）
+@app.route('/api/exam-arrangements', methods=['GET'])
+@login_required
+def get_exam_arrangements():
+    """获取考务安排列表"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        # 管理员可以看到所有安排，教师只能看到自己被安排的
+        if user.role == 'admin':
+            exams = ExamArrangement.query.order_by(ExamArrangement.exam_date.desc()).all()
+        else:
+            # 教师只查看自己被安排的考试
+            exams = ExamArrangement.query.join(ExamInvigilator).filter(
+                ExamInvigilator.teacher_id == user_id
+            ).order_by(ExamArrangement.exam_date.desc()).all()
+        
+        result = []
+        for exam in exams:
+            invigilators = ExamInvigilator.query.filter_by(exam_id=exam.id).all()
+            exam_data = {
+                'id': exam.id,
+                'exam_name': exam.exam_name,
+                'exam_date': exam.exam_date.isoformat(),
+                'start_time': exam.start_time.strftime('%H:%M'),
+                'end_time': exam.end_time.strftime('%H:%M'),
+                'location': exam.location,
+                'description': exam.description,
+                'created_at': exam.created_at.isoformat(),
+                'invigilators': [{
+                    'id': inv.teacher_id,
+                    'username': inv.teacher.username,
+                    'realname': inv.teacher.realname
+                } for inv in invigilators]
+            }
+            result.append(exam_data)
+        
+        return jsonify({'success': True, 'exams': result})
+    except Exception as e:
+        print(f"获取考务安排失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+
+# 创建考务安排（仅管理员）
+@app.route('/api/exam-arrangements', methods=['POST'])
+@login_required
+def create_exam_arrangement():
+    """创建考务安排"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        data = request.get_json()
+        
+        exam = ExamArrangement(
+            exam_name=data['exam_name'],
+            exam_date=datetime.strptime(data['exam_date'], '%Y-%m-%d').date(),
+            start_time=datetime.strptime(data['start_time'], '%H:%M').time(),
+            end_time=datetime.strptime(data['end_time'], '%H:%M').time(),
+            location=data['location'],
+            description=data.get('description', ''),
+            created_by=user_id
+        )
+        
+        db.session.add(exam)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'exam': {
+            'id': exam.id,
+            'exam_name': exam.exam_name,
+            'exam_date': exam.exam_date.isoformat(),
+            'start_time': exam.start_time.strftime('%H:%M'),
+            'end_time': exam.end_time.strftime('%H:%M'),
+            'location': exam.location,
+            'description': exam.description
+        }})
+    except Exception as e:
+        db.session.rollback()
+        print(f"创建考务安排失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'创建失败: {str(e)}'}), 500
+
+
+# 更新考务安排（仅管理员）
+@app.route('/api/exam-arrangements/<int:exam_id>', methods=['PUT'])
+@login_required
+def update_exam_arrangement(exam_id):
+    """更新考务安排"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        exam = ExamArrangement.query.get(exam_id)
+        if not exam:
+            return jsonify({'success': False, 'message': '考务安排不存在'}), 404
+        
+        data = request.get_json()
+        
+        exam.exam_name = data.get('exam_name', exam.exam_name)
+        if 'exam_date' in data:
+            exam.exam_date = datetime.strptime(data['exam_date'], '%Y-%m-%d').date()
+        if 'start_time' in data:
+            exam.start_time = datetime.strptime(data['start_time'], '%H:%M').time()
+        if 'end_time' in data:
+            exam.end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+        exam.location = data.get('location', exam.location)
+        exam.description = data.get('description', exam.description)
+        
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '更新成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"更新考务安排失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'更新失败: {str(e)}'}), 500
+
+
+# 删除考务安排（仅管理员）
+@app.route('/api/exam-arrangements/<int:exam_id>', methods=['DELETE'])
+@login_required
+def delete_exam_arrangement(exam_id):
+    """删除考务安排"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        exam = ExamArrangement.query.get(exam_id)
+        if not exam:
+            return jsonify({'success': False, 'message': '考务安排不存在'}), 404
+        
+        db.session.delete(exam)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除考务安排失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
+
+
+# 为考务安排分配监考教师（仅管理员）
+@app.route('/api/exam-arrangements/<int:exam_id>/invigilators', methods=['POST'])
+@login_required
+def assign_invigilator(exam_id):
+    """分配监考教师"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        exam = ExamArrangement.query.get(exam_id)
+        if not exam:
+            return jsonify({'success': False, 'message': '考务安排不存在'}), 404
+        
+        data = request.get_json()
+        teacher_id = data['teacher_id']
+        
+        # 检查教师是否存在
+        teacher = User.query.get(teacher_id)
+        if not teacher or teacher.role != 'teacher':
+            return jsonify({'success': False, 'message': '教师不存在'}), 404
+        
+        # 检查是否已分配
+        existing = ExamInvigilator.query.filter_by(exam_id=exam_id, teacher_id=teacher_id).first()
+        if existing:
+            return jsonify({'success': False, 'message': '该教师已被分配'}), 400
+        
+        invigilator = ExamInvigilator(exam_id=exam_id, teacher_id=teacher_id)
+        db.session.add(invigilator)
+        db.session.commit()
+        
+        # 创建通知
+        notification = Notification(
+            user_id=teacher_id,
+            type='exam_assignment',
+            title='考务安排通知',
+            content=f'您被安排监考：{exam.exam_name}，时间：{exam.exam_date} {exam.start_time}-{exam.end_time}，地点：{exam.location}',
+            is_read=False,
+            related_id=exam_id
+        )
+        db.session.add(notification)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '分配成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"分配监考教师失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'分配失败: {str(e)}'}), 500
+
+
+# 移除监考教师（仅管理员）
+@app.route('/api/exam-arrangements/<int:exam_id>/invigilators/<int:teacher_id>', methods=['DELETE'])
+@login_required
+def remove_invigilator(exam_id, teacher_id):
+    """移除监考教师"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        invigilator = ExamInvigilator.query.filter_by(exam_id=exam_id, teacher_id=teacher_id).first()
+        if not invigilator:
+            return jsonify({'success': False, 'message': '监考安排不存在'}), 404
+        
+        db.session.delete(invigilator)
+        db.session.commit()
+        
+        return jsonify({'success': True, 'message': '移除成功'})
+    except Exception as e:
+        db.session.rollback()
+        print(f"移除监考教师失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'移除失败: {str(e)}'}), 500
+
+
+# 获取所有教师列表（用于分配监考）
+@app.route('/api/teachers/list', methods=['GET'])
+@login_required
+def get_teachers_list():
+    """获取教师列表"""
+    try:
+        teachers = User.query.filter_by(role='teacher').all()
+        result = [{
+            'id': t.id,
+            'username': t.username,
+            'realname': t.realname,
+            'department': t.department
+        } for t in teachers]
+        
+        return jsonify({'success': True, 'teachers': result})
+    except Exception as e:
+        print(f"获取教师列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000, host='0.0.0.0')
