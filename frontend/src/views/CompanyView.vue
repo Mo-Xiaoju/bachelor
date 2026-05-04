@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { buildURL } from '../utils/api'
+import CompanyStatistics from '../components/CompanyStatistics.vue'
 
 // 导入 china-area-data 包
 import chinaAreaData from 'china-area-data'
@@ -159,6 +160,8 @@ const internshipForm = ref({
   welfareTags: [] as string[],
   quota: 1,
   deadline: '',
+  experienceRequirement: '',
+  educationRequirement: '',
 })
 
 // 标签输入
@@ -247,6 +250,17 @@ const addWelfareTag = () => {
 // 移除福利标签
 const removeWelfareTag = (index: number) => {
   internshipForm.value.welfareTags.splice(index, 1)
+}
+
+// 数据统计
+const showStatisticsDialog = ref(false)
+const statisticsRef = ref<any>(null)
+
+const openStatistics = () => {
+  showStatisticsDialog.value = true
+  nextTick(() => {
+    statisticsRef.value?.loadStatistics()
+  })
 }
 
 // 学生管理
@@ -527,6 +541,8 @@ const publishInternship = async () => {
         welfareTags: [],
         quota: 1,
         deadline: '',
+        experienceRequirement: '',
+        educationRequirement: '',
       }
       skillTagInput.value = ''
       welfareTagInput.value = ''
@@ -891,9 +907,9 @@ onUnmounted(() => {
               <div class="function-icon">👥</div>
               <span class="function-link">学生管理</span>
             </div>
-            <div class="function-item">
+            <div class="function-item" @click="openStatistics">
               <div class="function-icon">📊</div>
-              <RouterLink to="/internship" class="function-link">数据统计</RouterLink>
+              <span class="function-link">数据统计</span>
             </div>
           </div>
         </div>
@@ -1137,6 +1153,28 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="form-row">
+            <div class="form-item">
+              <label>经验要求：</label>
+              <select v-model="internshipForm.experienceRequirement" class="location-select">
+                <option value="">经验不限</option>
+                <option value="应届生">应届生</option>
+                <option value="1年以内">1年以内</option>
+                <option value="1-3年">1-3年</option>
+                <option value="3-5年">3-5年</option>
+                <option value="5年以上">5年以上</option>
+              </select>
+            </div>
+            <div class="form-item">
+              <label>学历要求：</label>
+              <select v-model="internshipForm.educationRequirement" class="location-select">
+                <option value="">学历不限</option>
+                <option value="本科">本科</option>
+                <option value="硕士">硕士</option>
+                <option value="博士">博士</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
             <div class="form-item full-width">
               <label>技能标签：</label>
               <div class="tag-container">
@@ -1209,6 +1247,8 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <CompanyStatistics ref="statisticsRef" :show="showStatisticsDialog" @close="showStatisticsDialog = false" />
 
   </div>
 </template>

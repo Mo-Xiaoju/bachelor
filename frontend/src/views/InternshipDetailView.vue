@@ -51,7 +51,7 @@ const getInternshipDetail = async () => {
 }
 
 const goBack = () => {
-  router.push('/internship')
+  router.push({ path: '/internship', query: { tab: '实习报名' } })
 }
 
 const applyInternship = () => {
