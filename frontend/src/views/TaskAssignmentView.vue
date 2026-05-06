@@ -172,6 +172,7 @@ const selectedExam = ref<any>(null)
 const teachers = ref<any[]>([])
 const loadingTeachers = ref(false)
 const selectedTeacherId = ref('')
+const sendingReminders = ref(false)
 
 const examForm = ref({
   exam_name: '',
@@ -368,6 +369,31 @@ const removeInvigilator = async (examId: number, teacherId: number) => {
   }
 }
 
+// 发送今日考试提醒
+const sendTodayReminders = async () => {
+  if (!confirm('确定要发送今日考试提醒邮件吗？')) return
+
+  sendingReminders.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/exam-reminders/send-today'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+
+    const result = await response.json()
+    alert(result.message)
+  } catch (error) {
+    console.error('发送提醒失败', error)
+    alert('发送提醒失败')
+  } finally {
+    sendingReminders.value = false
+  }
+}
+
 onMounted(async () => {
   await checkAuth()
   if (user.value?.role === 'teacher') {
@@ -486,9 +512,12 @@ onMounted(async () => {
         <div v-if="activeMenu === 'examManagement'" class="content-section">
           <div class="exam-header">
             <h2>考务管理</h2>
-            <button v-if="user?.role === 'admin'" class="add-btn" @click="openExamForm()">
-              + 新增考务安排
-            </button>
+            <div class="header-buttons">
+              
+              <button v-if="user?.role === 'admin'" class="add-btn" @click="openExamForm()">
+                + 新增考务安排
+              </button>
+            </div>
           </div>
 
           <div v-if="loadingExams" class="loading-cell">
