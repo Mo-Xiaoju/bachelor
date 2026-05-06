@@ -9,8 +9,13 @@ from functools import wraps
 import jwt
 import random
 import os
+import time
 from dotenv import load_dotenv
 import docx
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.header import Header
 
 load_dotenv()  # 自动读取当前文件夹下的 .env 文件
 
@@ -45,6 +50,13 @@ os.makedirs(UPLOAD_FOLDER_EXPERIMENT_REPORTS, exist_ok=True)
 # JWT 配置
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
 JWT_EXPIRATION_DELTA = timedelta(days=7)
+
+# 邮件配置（QQ邮箱）
+SMTP_SERVER = 'smtp.163.com'
+SMTP_PORT = 587
+SMTP_USER = os.environ.get('SMTP_USER', 'your-qq-email@qq.com')  # 你的QQ邮箱
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'your-qq-authorization-code')  # QQ邮箱授权码
+SMTP_FROM_NAME = os.environ.get('SMTP_FROM_NAME', '考务管理系统')
 
 # 允许的源地址，支持环境变量配置
 ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost,http://localhost:5173,http://localhost:80').split(',')
@@ -461,6 +473,149 @@ class ExamInvigilator(db.Model):
     __table_args__ = (
         db.UniqueConstraint('exam_id', 'teacher_id', name='_exam_teacher_uc'),
     )
+
+# 邮件发送记录表
+class EmailLog(db.Model):
+    __tablename__ = 'email_log'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # 收件教师ID
+    exam_id = db.Column(db.Integer, db.ForeignKey('exam_arrangement.id'), nullable=False)  # 关联考试
+    email_type = db.Column(db.String(50), nullable=False)  # assignment: 分配通知, reminder: 考试当天提醒
+    recipient_email = db.Column(db.String(255), nullable=False)  # 收件邮箱
+    subject = db.Column(db.String(255), nullable=False)  # 邮件主题
+    content = db.Column(db.Text, nullable=False)  # 邮件内容
+    send_status = db.Column(db.Boolean, default=False)  # 发送状态
+    error_msg = db.Column(db.Text, nullable=True)  # 错误信息
+    sent_at = db.Column(db.DateTime, nullable=True)  # 发送时间
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)  # 创建时间
+    
+    # 关系
+    teacher = db.relationship('User', backref=db.backref('email_logs', lazy='dynamic'))
+    exam = db.relationship('ExamArrangement', backref=db.backref('email_logs', lazy='dynamic'))
+
+# 邮件发送函数
+def send_email(to_email, subject, content):
+    """发送邮件，支持多个邮箱（用逗号分隔）"""
+    try:
+        # 分割多个邮箱
+        emails = [e.strip() for e in to_email.split(',') if e.strip()]
+        if not emails:
+            return False, "没有有效的邮箱地址"
+        
+        msg = MIMEMultipart()
+        # 对中文昵称进行base64编码，符合RFC2047标准
+        from_name_encoded = Header(SMTP_FROM_NAME, 'utf-8').encode()
+        msg['From'] = f"{from_name_encoded} &lt;{SMTP_USER}&gt;"
+        msg['Subject'] = Header(subject, 'utf-8')
+        
+        msg.attach(MIMEText(content, 'plain', 'utf-8'))
+        
+        # 逐个发送给每个邮箱，每个邮箱独立连接
+        success_count = 0
+        error_messages = []
+        
+        for single_email in emails:
+            try:
+                # 为每个邮箱创建新的邮件对象
+                msg_single = MIMEMultipart()
+                from_name_encoded = Header(SMTP_FROM_NAME, 'utf-8').encode()
+                msg_single['From'] = f"{from_name_encoded} <{SMTP_USER}>"
+                msg_single['To'] = single_email
+                msg_single['Subject'] = Header(subject, 'utf-8')
+                msg_single.attach(MIMEText(content, 'plain', 'utf-8'))
+                
+                # 每个邮箱独立连接
+                if SMTP_PORT == 465:
+                    server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=5)
+                else:
+                    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
+                    server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.sendmail(SMTP_USER, [single_email], msg_single.as_string())
+                server.quit()
+                
+                success_count += 1
+                # 添加延迟，避免发送过快被判定为垃圾邮件
+                if len(emails) > 1:
+                    time.sleep(3)
+            except Exception as e:
+                error_msg = f"{single_email}: {str(e)}"
+                error_messages.append(error_msg)
+                print(f"发送给 {single_email} 失败: {str(e)}")
+        
+        if success_count == len(emails):
+            return True, f"成功发送给 {success_count} 个邮箱"
+        elif success_count > 0:
+            return True, f"部分成功: {success_count}/{len(emails)}, 错误: {'; '.join(error_messages)}"
+        else:
+            return False, f"全部失败: {'; '.join(error_messages)}"
+    except Exception as e:
+        print(f"邮件发送失败: {str(e)}")
+        return False, str(e)
+
+# 发送监考分配通知邮件
+def send_invigilator_assignment_email(teacher, exam):
+    """发送监考分配通知邮件"""
+    if not teacher.email:
+        return False, "教师邮箱不存在"
+    
+    exam_date_str = exam.exam_date.strftime('%Y年%m月%d日')
+    start_time_str = exam.start_time.strftime('%H:%M')
+    
+    subject = "测试邮件"
+    
+    content = "测试用"
+    
+    success, error_msg = send_email(teacher.email, subject, content)
+    
+    # 记录邮件发送日志
+    email_log = EmailLog(
+        teacher_id=teacher.id,
+        exam_id=exam.id,
+        email_type='assignment',
+        recipient_email=teacher.email,
+        subject=subject,
+        content=content,
+        send_status=success,
+        error_msg=error_msg,
+        sent_at=datetime.utcnow() if success else None
+    )
+    db.session.add(email_log)
+    db.session.commit()
+    
+    return success, error_msg
+
+# 发送考试当天提醒邮件
+def send_exam_reminder_email(teacher, exam):
+    """发送考试当天提醒邮件"""
+    if not teacher.email:
+        return False, "教师邮箱不存在"
+    
+    exam_date_str = exam.exam_date.strftime('%Y年%m月%d日')
+    start_time_str = exam.start_time.strftime('%H:%M')
+    
+    subject = "测试邮件"
+    
+    content = "测试用"
+    
+    success, error_msg = send_email(teacher.email, subject, content)
+    
+    # 记录邮件发送日志
+    email_log = EmailLog(
+        teacher_id=teacher.id,
+        exam_id=exam.id,
+        email_type='reminder',
+        recipient_email=teacher.email,
+        subject=subject,
+        content=content,
+        send_status=success,
+        error_msg=error_msg,
+        sent_at=datetime.utcnow() if success else None
+    )
+    db.session.add(email_log)
+    db.session.commit()
+    
+    return success, error_msg
 
 # JWT Token 工具函数
 def generate_token(user_id, username, role):
@@ -2756,8 +2911,10 @@ def update_user_profile():
         if email:
             import re
             email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            if not re.match(email_pattern, email):
-                return jsonify({'success': False, 'message': '邮箱格式不正确'}), 400
+            emails = [e.strip() for e in email.split(',') if e.strip()]
+            for single_email in emails:
+                if not re.match(email_pattern, single_email):
+                    return jsonify({'success': False, 'message': f'邮箱格式不正确: {single_email}'}), 400
         
         # 更新联系方式
         if contact is not None:
@@ -5810,14 +5967,26 @@ def get_exam_arrangements():
         user_id = request.current_user['user_id']
         user = User.query.get(user_id)
         
+        # 获取分页参数
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+        
         # 管理员可以看到所有安排，教师只能看到自己被安排的
         if user.role == 'admin':
-            exams = ExamArrangement.query.order_by(ExamArrangement.exam_date.desc()).all()
+            query = ExamArrangement.query.order_by(ExamArrangement.exam_date.desc())
         else:
             # 教师只查看自己被安排的考试
-            exams = ExamArrangement.query.join(ExamInvigilator).filter(
+            query = ExamArrangement.query.join(ExamInvigilator).filter(
                 ExamInvigilator.teacher_id == user_id
-            ).order_by(ExamArrangement.exam_date.desc()).all()
+            ).order_by(ExamArrangement.exam_date.desc())
+        
+        # 获取总数
+        total = query.count()
+        total_pages = (total + page_size - 1) // page_size
+        
+        # 分页查询
+        offset = (page - 1) * page_size
+        exams = query.offset(offset).limit(page_size).all()
         
         result = []
         for exam in exams:
@@ -5839,7 +6008,16 @@ def get_exam_arrangements():
             }
             result.append(exam_data)
         
-        return jsonify({'success': True, 'exams': result})
+        return jsonify({
+            'success': True, 
+            'exams': result,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total': total,
+                'total_pages': total_pages
+            }
+        })
     except Exception as e:
         print(f"获取考务安排失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
@@ -5993,9 +6171,15 @@ def assign_invigilator(exam_id):
             related_id=exam_id
         )
         db.session.add(notification)
+        
+        # 发送邮件通知
+        email_success, email_error = send_invigilator_assignment_email(teacher, exam)
         db.session.commit()
         
-        return jsonify({'success': True, 'message': '分配成功'})
+        if email_success:
+            return jsonify({'success': True, 'message': '分配成功，邮件通知已发送'})
+        else:
+            return jsonify({'success': True, 'message': f'分配成功，但邮件通知发送失败：{email_error}'})
     except Exception as e:
         db.session.rollback()
         print(f"分配监考教师失败: {str(e)}")
@@ -6045,6 +6229,124 @@ def get_teachers_list():
         return jsonify({'success': True, 'teachers': result})
     except Exception as e:
         print(f"获取教师列表失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
+
+
+# 发送考试当天提醒邮件（仅管理员）
+@app.route('/api/exam-reminders/send-today', methods=['POST'])
+@login_required
+def send_today_exam_reminders():
+    """发送今日考试提醒邮件"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        today = datetime.utcnow().date()
+        
+        # 获取今日的考试安排
+        exams = ExamArrangement.query.filter_by(exam_date=today).all()
+        
+        if not exams:
+            return jsonify({'success': True, 'message': '今日无考试安排'})
+        
+        sent_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for exam in exams:
+            invigilators = ExamInvigilator.query.filter_by(exam_id=exam.id).all()
+            
+            for invigilator in invigilators:
+                teacher = User.query.get(invigilator.teacher_id)
+                if not teacher or not teacher.email:
+                    skipped_count += 1
+                    continue
+                
+                # 检查今天是否已经发送过提醒
+                existing_log = EmailLog.query.filter_by(
+                    teacher_id=teacher.id,
+                    exam_id=exam.id,
+                    email_type='reminder'
+                ).filter(
+                    db.func.date(EmailLog.created_at) == today
+                ).first()
+                
+                if existing_log:
+                    skipped_count += 1
+                    continue
+                
+                # 发送提醒邮件
+                success, error_msg = send_exam_reminder_email(teacher, exam)
+                if success:
+                    sent_count += 1
+                else:
+                    error_count += 1
+        
+        return jsonify({
+            'success': True,
+            'message': f'提醒发送完成：成功{sent_count}封，跳过{skipped_count}封，失败{error_count}封',
+            'stats': {
+                'sent': sent_count,
+                'skipped': skipped_count,
+                'error': error_count
+            }
+        })
+    except Exception as e:
+        print(f"发送考试提醒失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'发送失败: {str(e)}'}), 500
+
+
+# 获取邮件发送日志（仅管理员）
+@app.route('/api/email-logs', methods=['GET'])
+@login_required
+def get_email_logs():
+    """获取邮件发送日志"""
+    try:
+        user_id = request.current_user['user_id']
+        user = User.query.get(user_id)
+        
+        if user.role != 'admin':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        logs = EmailLog.query.order_by(EmailLog.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        result = []
+        for log in logs.items:
+            teacher = User.query.get(log.teacher_id)
+            exam = ExamArrangement.query.get(log.exam_id)
+            result.append({
+                'id': log.id,
+                'teacher_name': teacher.realname if teacher else '未知',
+                'teacher_email': log.recipient_email,
+                'exam_name': exam.exam_name if exam else '未知',
+                'email_type': log.email_type,
+                'subject': log.subject,
+                'send_status': log.send_status,
+                'error_msg': log.error_msg,
+                'sent_at': log.sent_at.strftime('%Y-%m-%d %H:%M:%S') if log.sent_at else None,
+                'created_at': log.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        
+        return jsonify({
+            'success': True,
+            'logs': result,
+            'pagination': {
+                'page': logs.page,
+                'per_page': logs.per_page,
+                'total': logs.total,
+                'pages': logs.pages
+            }
+        })
+    except Exception as e:
+        print(f"获取邮件日志失败: {str(e)}")
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
 
 

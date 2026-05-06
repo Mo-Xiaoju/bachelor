@@ -35,6 +35,11 @@ const selectedExam = ref<any>(null)
 const teachers = ref<any[]>([])
 const loadingExamTeachers = ref(false)
 const selectedTeacherId = ref('')
+const sendingReminders = ref(false)
+// 分页
+const examCurrentPage = ref(1)
+const examPageSize = ref(10)
+const examPagination = ref<any>({ total: 0, total_pages: 1 })
 
 const examForm = ref({
   exam_name: '',
@@ -1220,11 +1225,12 @@ const closeProjectDetail = () => {
 }
 
 // 考务管理相关方法
-const getExams = async () => {
+const getExams = async (page = 1) => {
   loadingExams.value = true
   try {
     const token = sessionStorage.getItem('token')
-    const response = await fetch(buildURL('/api/exam-arrangements'), {
+    examCurrentPage.value = page
+    const response = await fetch(buildURL(`/api/exam-arrangements?page=${page}&page_size=${examPageSize.value}`), {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -1233,6 +1239,9 @@ const getExams = async () => {
     const result = await response.json()
     if (result.success) {
       exams.value = result.exams
+      if (result.pagination) {
+        examPagination.value = result.pagination
+      }
     }
   } catch (error) {
     console.error('获取考务安排失败', error)
@@ -1404,6 +1413,34 @@ const removeInvigilator = async (examId: number, teacherId: number) => {
   } catch (error) {
     console.error('移除监考教师失败', error)
     errorMessage.value = '移除失败'
+  }
+}
+
+// 发送今日考试提醒
+const sendTodayReminders = async () => {
+  if (!confirm('确定要向今日有监考任务的教师发送邮件提醒吗？')) return
+
+  sendingReminders.value = true
+  try {
+    const token = sessionStorage.getItem('token')
+    const response = await fetch(buildURL('/api/exam-reminders/send-today'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+    })
+    const result = await response.json()
+    if (result.success) {
+      successMessage.value = result.message || '邮件提醒发送成功'
+    } else {
+      errorMessage.value = result.message || '发送失败'
+    }
+  } catch (error) {
+    console.error('发送提醒失败', error)
+    errorMessage.value = '发送提醒失败'
+  } finally {
+    sendingReminders.value = false
   }
 }
 
