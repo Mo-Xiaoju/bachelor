@@ -75,6 +75,9 @@ const editForm = ref({
   email: '',
 })
 
+const contactInputs = ref<string[]>(['', '', ''])
+const emailInputs = ref<string[]>(['', '', ''])
+
 // 修改密码表单
 const passwordForm = ref({
   oldPassword: '',
@@ -236,12 +239,32 @@ const getStatusClass = (status: string) => {
 }
 
 const editContactInfo = () => {
-  editForm.value.contact = user.value?.contact || ''
-  editForm.value.email = user.value?.email || ''
+  const contacts = user.value?.contact ? user.value.contact.split(',').filter((c: string) => c.trim()) : []
+  const emails = user.value?.email ? user.value.email.split(',').filter((e: string) => e.trim()) : []
+
+  contactInputs.value = ['', '', '']
+  emailInputs.value = ['', '', '']
+
+  contacts.forEach((c: string, i: number) => {
+    if (i < 3) contactInputs.value[i] = c.trim()
+  })
+
+  emails.forEach((e: string, i: number) => {
+    if (i < 3) emailInputs.value[i] = e.trim()
+  })
+
   isEditing.value = true
 }
 
 const saveContactInfo = async () => {
+  const validContacts = contactInputs.value.filter(c => c.trim()).join(',')
+  const validEmails = emailInputs.value.filter(e => e.trim()).join(',')
+
+  if (!validContacts && !validEmails) {
+    alert('请至少填写一个联系方式')
+    return
+  }
+
   try {
     const token = sessionStorage.getItem('token')
     const response = await fetch(buildURL('/api/user/profile'), {
@@ -251,12 +274,15 @@ const saveContactInfo = async () => {
         Authorization: `Bearer ${token}`,
       },
       credentials: 'include',
-      body: JSON.stringify(editForm.value),
+      body: JSON.stringify({
+        contact: validContacts,
+        email: validEmails
+      }),
     })
     const result = await response.json()
     if (result.success) {
-      user.value.contact = editForm.value.contact
-      user.value.email = editForm.value.email
+      user.value.contact = validContacts
+      user.value.email = validEmails
       isEditing.value = false
       alert('联系方式保存成功')
     } else {
@@ -704,6 +730,29 @@ onMounted(() => {
   margin-bottom: 25px;
   padding-bottom: 15px;
   border-bottom: 2px solid #667eea;
+}
+
+.form-hint {
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 20px;
+  padding: 8px 12px;
+  background: #f0f4ff;
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+}
+
+.form-section {
+  margin-bottom: 25px;
+}
+
+.form-section h4 {
+  color: #2c3e50;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e0e0e0;
 }
 
 .form-row {
@@ -1333,16 +1382,24 @@ onMounted(() => {
             <!-- 编辑表单 -->
             <div v-if="isEditing" class="edit-form">
               <h3>编辑联系方式</h3>
-              <div class="form-row">
-                <div class="form-item">
-                  <label>联系电话：</label>
-                  <input type="tel" v-model="editForm.contact" placeholder="请输入联系电话" />
-                </div>
-                <div class="form-item">
-                  <label>电子邮箱：</label>
-                  <input type="email" v-model="editForm.email" placeholder="请输入电子邮箱" />
+              <p class="form-hint">最多可添加3个联系方式，多个联系方式以逗号分隔</p>
+
+              <div class="form-section">
+                <h4>联系电话</h4>
+                <div class="form-item" v-for="(item, index) in contactInputs" :key="'contact-' + index">
+                  <label>电话 {{ index + 1 }}：</label>
+                  <input type="tel" v-model="contactInputs[index]" :placeholder="`请输入联系电话${index + 1}`" />
                 </div>
               </div>
+
+              <div class="form-section">
+                <h4>电子邮箱</h4>
+                <div class="form-item" v-for="(item, index) in emailInputs" :key="'email-' + index">
+                  <label>邮箱 {{ index + 1 }}：</label>
+                  <input type="email" v-model="emailInputs[index]" :placeholder="`请输入电子邮箱${index + 1}`" />
+                </div>
+              </div>
+
               <div class="form-actions">
                 <button class="save-btn" @click="saveContactInfo">保存</button>
                 <button class="cancel-btn" @click="isEditing = false">取消</button>

@@ -9,3 +9,4 @@ openpyxl==3.1.5
 SQLAlchemy==2.0.31
 python-dotenv==1.0.1
 python-docx==0.8.10
+alibabacloud-dysmsapi20170525==4.5.1

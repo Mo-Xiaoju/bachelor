@@ -13,6 +13,28 @@
 
       <form @submit="handleSubmit">
         <div class="form-group">
+          <label for="contact">联系电话（至少一个）</label>
+          <input
+            type="tel"
+            id="contact"
+            v-model="form.contact"
+            required
+            placeholder="请输入联系电话"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="email">电子邮箱（至少一个）</label>
+          <input
+            type="email"
+            id="email"
+            v-model="form.email"
+            required
+            placeholder="请输入电子邮箱"
+          />
+        </div>
+
+        <div class="form-group">
           <label for="newPassword">新密码</label>
           <input
             type="password"
@@ -60,6 +82,8 @@ const getToken = (): string | null => {
 }
 
 const form = reactive({
+  contact: '',
+  email: '',
   newPassword: '',
   confirmPassword: ''
 })
@@ -69,6 +93,18 @@ const handleSubmit = async (e: Event) => {
   loading.value = true
   errorMessage.value = ''
   successMessage.value = ''
+
+  if (!form.contact.trim()) {
+    errorMessage.value = '请输入联系电话'
+    loading.value = false
+    return
+  }
+
+  if (!form.email.trim()) {
+    errorMessage.value = '请输入电子邮箱'
+    loading.value = false
+    return
+  }
 
   if (form.newPassword.length < 6) {
     errorMessage.value = '密码至少需要6位'
@@ -84,6 +120,29 @@ const handleSubmit = async (e: Event) => {
 
   try {
     const token = getToken()
+
+    // 先更新联系方式
+    const profileResponse = await fetch(buildURL('/api/user/profile'), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token ? `Bearer ${token}` : ''
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        contact: form.contact.trim(),
+        email: form.email.trim()
+      }),
+    })
+
+    const profileResult = await profileResponse.json()
+    if (!profileResult.success) {
+      errorMessage.value = '更新联系方式失败: ' + profileResult.message
+      loading.value = false
+      return
+    }
+
+    // 再更新密码
     const response = await fetch(buildURL('/api/change-password'), {
       method: 'POST',
       headers: {
