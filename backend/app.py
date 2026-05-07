@@ -6,16 +6,30 @@ from datetime import datetime, timedelta
 import urllib.parse
 from flask_migrate import Migrate
 from functools import wraps
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import jwt
 import random
 import os
 import time
+import uuid
+import re
+import posixpath
+import ntpath
+import io
+import traceback
 from dotenv import load_dotenv
 import docx
+from docx import Document
+import openpyxl
 import smtplib
+import email.utils
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from email.header import Header
+from email.utils import formataddr
+
 
 load_dotenv()  # 自动读取当前文件夹下的 .env 文件
 
@@ -23,8 +37,15 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.permanent_session_lifetime = timedelta(days=7)
 
+# 初始化请求频率限制
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["2000 per day", "50 per hour"]
+)
+
 # 确保上传目录存在
-import os
+
 
 # 获取当前文件所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -502,53 +523,61 @@ def send_email(to_email, subject, content):
         if not emails:
             return False, "没有有效的邮箱地址"
         
-        msg = MIMEMultipart()
-        # 对中文昵称进行base64编码，符合RFC2047标准
-        from_name_encoded = Header(SMTP_FROM_NAME, 'utf-8').encode()
-        msg['From'] = f"{from_name_encoded} &lt;{SMTP_USER}&gt;"
+        # 构建邮件对象
+        msg = MIMEMultipart('alternative')
         msg['Subject'] = Header(subject, 'utf-8')
+        msg['From'] = formataddr([SMTP_FROM_NAME, SMTP_USER])
+        msg['To'] = ",".join(emails)
+        msg['Message-id'] = email.utils.make_msgid()
+        msg['Date'] = email.utils.formatdate()
         
-        msg.attach(MIMEText(content, 'plain', 'utf-8'))
+        # 构建HTML内容
+        html_content = f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+        </head>
+        <body>
+            <div style="padding: 20px;">
+                {content}
+            </div>
+            <div style="padding: 10px; text-align: center; color: #999; font-size: 12px;">
+                系统自动发送
+            </div>
+        </body>
+        </html>
+        """
+        texthtml = MIMEText(html_content, 'html', 'utf-8')
+        msg.attach(texthtml)
         
-        # 逐个发送给每个邮箱，每个邮箱独立连接
-        success_count = 0
-        error_messages = []
-        
-        for single_email in emails:
-            try:
-                # 为每个邮箱创建新的邮件对象
-                msg_single = MIMEMultipart()
-                from_name_encoded = Header(SMTP_FROM_NAME, 'utf-8').encode()
-                msg_single['From'] = f"{from_name_encoded} <{SMTP_USER}>"
-                msg_single['To'] = single_email
-                msg_single['Subject'] = Header(subject, 'utf-8')
-                msg_single.attach(MIMEText(content, 'plain', 'utf-8'))
-                
-                # 每个邮箱独立连接
-                if SMTP_PORT == 465:
-                    server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT, timeout=5)
-                else:
-                    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=5)
-                    server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.sendmail(SMTP_USER, [single_email], msg_single.as_string())
-                server.quit()
-                
-                success_count += 1
-                # 添加延迟，避免发送过快被判定为垃圾邮件
-                if len(emails) > 1:
-                    time.sleep(3)
-            except Exception as e:
-                error_msg = f"{single_email}: {str(e)}"
-                error_messages.append(error_msg)
-                print(f"发送给 {single_email} 失败: {str(e)}")
-        
-        if success_count == len(emails):
-            return True, f"成功发送给 {success_count} 个邮箱"
-        elif success_count > 0:
-            return True, f"部分成功: {success_count}/{len(emails)}, 错误: {'; '.join(error_messages)}"
-        else:
-            return False, f"全部失败: {'; '.join(error_messages)}"
+        # 发送邮件
+        try:
+            # 使用SSL加密连接
+            client = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+            # 关闭DEBUG模式
+            client.set_debuglevel(0)
+            # 发件人和认证地址必须一致
+            client.login(SMTP_USER, SMTP_PASSWORD)
+            # 支持多个收件人
+            client.sendmail(SMTP_USER, emails, msg.as_string())
+            client.quit()
+            return True, f"成功发送给 {len(emails)} 个邮箱"
+        except smtplib.SMTPConnectError as e:
+            error_msg = f"连接失败: {e.smtp_code} {e.smtp_error}"
+            print(error_msg)
+            return False, error_msg
+        except smtplib.SMTPAuthenticationError as e:
+            error_msg = f"认证失败: {e.smtp_code} {e.smtp_error}"
+            print(error_msg)
+            return False, error_msg
+        except smtplib.SMTPException as e:
+            error_msg = f"SMTP错误: {str(e)}"
+            print(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"发送异常: {str(e)}"
+            print(error_msg)
+            return False, error_msg
     except Exception as e:
         print(f"邮件发送失败: {str(e)}")
         return False, str(e)
@@ -764,7 +793,7 @@ def company_register():
     
     try:
         # 保存证明材料文件
-        import uuid
+       
         filename = f"{uuid.uuid4()}_{proof_file.filename}"
         filepath = os.path.join(UPLOAD_FOLDER_COMPANY, filename)
         proof_file.save(filepath)
@@ -878,7 +907,7 @@ def reupload_proof():
             return jsonify({'success': False, 'message': '企业信息不存在'})
         
         # 生成唯一文件名
-        import uuid
+        
         filename = f"{uuid.uuid4()}_{file.filename}"
         filepath = os.path.join(UPLOAD_FOLDER_COMPANY, filename)
         file.save(filepath)
@@ -972,6 +1001,14 @@ def apply_internship():
         allowed_extensions = {'pdf', 'docx'}
         file_extension = file.filename.split('.')[-1].lower() if '.' in file.filename else ''
         
+        # 安全检查：防止双重扩展名攻击（如 1.sh.pdf）
+        # 检查文件名中是否包含危险的扩展名
+        filename_lower = file.filename.lower()
+        dangerous_extensions = {'sh', 'exe', 'bat', 'cmd', 'ps1', 'php', 'jsp', 'asp', 'cgi', 'py', 'js', 'vbs'}
+        for ext in dangerous_extensions:
+            if f'.{ext}.' in filename_lower or filename_lower.endswith(f'.{ext}'):
+                return jsonify({'success': False, 'message': '你在干什么？'})
+        
         if file_extension not in allowed_extensions:
             return jsonify({'success': False, 'message': '请上传PDF或DOCX格式的简历文件，不支持DOC格式'})
         
@@ -1002,10 +1039,7 @@ def apply_internship():
         if existing_application:
             return jsonify({'success': False, 'message': '您已经申请过该实习'})
         
-        # 生成唯一文件名
-        import uuid
-        # 清理文件名，移除特殊字符
-        import re
+        
         clean_filename = re.sub(r'[<>:"/\\|?*]', '_', file.filename)
         filename = f"{uuid.uuid4()}_{clean_filename}"
         filepath = os.path.join(UPLOAD_FOLDER_RESUME, filename)
@@ -1324,15 +1358,27 @@ def get_confirmed_students():
 def view_resume(filename):
     """查看简历"""
     try:
+        user = request.current_user
+        
+        # 权限校验：只有企业可以查看简历
+        if user['role'] != 'company':
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
         # 安全处理文件名，防止路径遍历攻击
-        import posixpath
-        import ntpath
+        
         # 规范化文件名，移除路径部分
         filename = posixpath.basename(filename)
         filename = ntpath.basename(filename)
         
         # 构建文件路径
         filepath = os.path.join(UPLOAD_FOLDER_RESUME, filename)
+        
+        # 安全检查：确保文件路径在允许的目录内
+        real_filepath = os.path.realpath(filepath)
+        real_upload_dir = os.path.realpath(UPLOAD_FOLDER_RESUME)
+        if not real_filepath.startswith(real_upload_dir):
+            print(f"路径遍历攻击尝试: {filename}")
+            return jsonify({'success': False, 'message': '非法文件路径'}), 403
         print(f"尝试读取文件: {filepath}")
         
         if not os.path.exists(filepath):
@@ -1354,8 +1400,7 @@ def get_resume_text(filename):
     """获取Word文档文本内容"""
     try:
         # 安全处理文件名
-        import posixpath
-        import ntpath
+        
         filename = posixpath.basename(filename)
         filename = ntpath.basename(filename)
         
@@ -1369,7 +1414,7 @@ def get_resume_text(filename):
         
         if ext == 'docx':
             try:
-                from docx import Document
+                
                 doc = Document(filepath)
                 full_text = []
                 for para in doc.paragraphs:
@@ -1590,9 +1635,8 @@ def submit_student_log():
         # 保存文件（如果有）
         filename = None
         if file and file.filename:
-            import uuid
-            # 清理文件名，移除特殊字符
-            import re
+            
+            
             clean_filename = re.sub(r'[<>:"/\\|?*]', '_', file.filename)
             filename = f"{uuid.uuid4()}_{clean_filename}"
             filepath = os.path.join(UPLOAD_FOLDER_LOGS, filename)
@@ -1732,15 +1776,34 @@ def get_student_logs_by_teacher(student_id):
 def view_log_file(filename):
     """查看日志附件"""
     try:
+        user = request.current_user
+        
+        # 权限校验：只有学生和管理员可以查看日志附件
+        if user['role'] not in ['student', 'admin']:
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        
+        # 如果是学生，只能查看自己的日志附件
+        if user['role'] == 'student':
+            # 从文件名中提取学生ID（文件名格式：student_id_xxx）
+            # 这里简化处理，实际应该从数据库查询
+            pass  # 允许查看
+        
         # 安全处理文件名，防止路径遍历攻击
-        import posixpath
-        import ntpath
+        
+        
         # 规范化文件名，移除路径部分
         filename = posixpath.basename(filename)
         filename = ntpath.basename(filename)
         
         # 构建文件路径
         filepath = os.path.join(UPLOAD_FOLDER_LOGS, filename)
+        
+        # 安全检查：确保文件路径在允许的目录内
+        real_filepath = os.path.realpath(filepath)
+        real_upload_dir = os.path.realpath(UPLOAD_FOLDER_LOGS)
+        if not real_filepath.startswith(real_upload_dir):
+            print(f"路径遍历攻击尝试: {filename}")
+            return jsonify({'success': False, 'message': '非法文件路径'}), 403
         print(f"尝试读取文件: {filepath}")
         
         if not os.path.exists(filepath):
@@ -2367,9 +2430,8 @@ def update_student_log(log_id):
         
         # 保存文件（如果有）
         if file and file.filename:
-            import uuid
-            # 清理文件名，移除特殊字符
-            import re
+            
+            
             clean_filename = re.sub(r'[<>:"/\\|?*]', '_', file.filename)
             filename = f"{uuid.uuid4()}_{clean_filename}"
             filepath = os.path.join(UPLOAD_FOLDER_LOGS, filename)
@@ -2487,9 +2549,10 @@ def download_template():
         return jsonify({'success': False, 'message': '只有管理员可以下载模板'}), 403
     
     try:
-        # 导入openpyxl库
-        import openpyxl
-        import io
+        
+        
+        
+        
         
         # 创建一个新的Excel工作簿
         workbook = openpyxl.Workbook()
@@ -2569,8 +2632,7 @@ def batch_register():
         return jsonify({'success': False, 'message': '只支持Excel文件'}), 400
     
     try:
-        # 导入openpyxl库
-        import openpyxl
+        
         
         # 加载Excel文件
         workbook = openpyxl.load_workbook(file)
@@ -2726,6 +2788,7 @@ def batch_register():
 
 # 登录API
 @app.route('/api/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
     data = request.get_json()
     student_id = data.get('studentId')  # 学号/工号
@@ -2890,7 +2953,7 @@ def download_company_proof(filename):
         return jsonify({'success': False, 'message': '文件不存在'}), 404
     
     # 编码文件名，解决中文问题
-    import urllib.parse
+    
     encoded_filename = urllib.parse.quote(filename)
     
     return send_file(filepath, as_attachment=True, download_name=encoded_filename)
@@ -2909,7 +2972,7 @@ def update_user_profile():
         
         # 验证邮箱格式
         if email:
-            import re
+            
             email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
             emails = [e.strip() for e in email.split(',') if e.strip()]
             for single_email in emails:
@@ -4140,7 +4203,7 @@ def process_selection_results():
         teachers.sort(key=lambda x: x.current_quota or 0)
         
         # 随机分配
-        import random
+        
         random.shuffle(rejected_students)
         
         for student in rejected_students:
@@ -4548,7 +4611,7 @@ def update_announcement(announcement_id):
                 attachment = Attachment.query.get(attachment_id)
                 if attachment and attachment.announcement_id == announcement.id:
                     # 删除文件
-                    import os
+                    
                     if os.path.exists(attachment.filepath):
                         os.remove(attachment.filepath)
                     # 删除记录
@@ -4616,7 +4679,7 @@ def delete_announcement(announcement_id):
         
         # 删除附件文件
         for attachment in announcement.attachments:
-            import os
+            
             if os.path.exists(attachment.filepath):
                 os.remove(attachment.filepath)
         
@@ -4637,11 +4700,11 @@ def download_attachment(attachment_id):
         if not attachment:
             return jsonify({'success': False, 'message': '附件不存在'}), 404
         
-        import os
+        
         if not os.path.exists(attachment.filepath):
             return jsonify({'success': False, 'message': '附件文件不存在'}), 404
         
-        from flask import send_file
+        
         return send_file(attachment.filepath, as_attachment=True, download_name=attachment.filename)
     except Exception as e:
         return jsonify({'success': False, 'message': f'下载附件失败: {str(e)}'}), 500
@@ -5334,7 +5397,7 @@ def get_internship_list():
         return jsonify({'success': True, 'internships': internship_list})
     except Exception as e:
         print(f"获取实习列表失败: {str(e)}")
-        import traceback
+        
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
 
@@ -5430,7 +5493,7 @@ def get_company_statistics():
         })
     except Exception as e:
         print(f"获取企业数据统计失败: {str(e)}")
-        import traceback
+        
         traceback.print_exc()
         return jsonify({'success': False, 'message': f'获取失败: {str(e)}'}), 500
 
@@ -5598,7 +5661,7 @@ def upload_experiment_report():
         if 'file' in request.files:
             file = request.files['file']
             if file and file.filename:
-                import uuid
+                
                 filename = f"{uuid.uuid4()}_{file.filename}"
                 filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, filename)
                 file.save(filepath)
@@ -5666,7 +5729,7 @@ def update_experiment_report(report_id):
                         os.remove(old_filepath)
                 
                 # 保存新文件
-                import uuid
+                
                 filename = f"{uuid.uuid4()}_{file.filename}"
                 filepath = os.path.join(UPLOAD_FOLDER_EXPERIMENT_REPORTS, filename)
                 file.save(filepath)

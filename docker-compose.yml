@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # 数据库服务（你之前漏掉了！）
+  db:
+    image: mysql:8.0
+    container_name: mysql
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=zhl050505
+      - MYSQL_DATABASE=bachelor
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - bachelor-network
+
+  backend:
+    image: crpi-5gf9izcbddfhjjvc.cn-hangzhou.personal.cr.aliyuncs.com/leigod/bachelor-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_HOST=db
+      - DATABASE_PORT=3306
+      - DATABASE_USER=root
+      - DATABASE_PASSWORD=zhl050505
+      - DATABASE_NAME=bachelor
+      - FLASK_ENV=production
+    volumes:
+      - backend-uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - bachelor-network
+    depends_on:
+      - db
+
+  frontend:
+    image: crpi-5gf9izcbddfhjjvc.cn-hangzhou.personal.cr.aliyuncs.com/leigod/bachelor-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - bachelor-network
+
+volumes:
+  backend-uploads:
+    driver: local
+  mysql-data:
+
+networks:
+  bachelor-network:
+    driver: bridge
