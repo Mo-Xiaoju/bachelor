@@ -1,0 +1,8 @@
+#trae
+.trae/
+#debug
+debug.log
+#docker-compose.yml
+docker-compose.yml
+#push_to_aliyun.ps1
+push_to_aliyun.ps1
